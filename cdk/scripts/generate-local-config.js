@@ -6,14 +6,16 @@ const { program } = require('commander');
 // Parse command line arguments
 program
   .option('-e, --env <environment>', 'Environment name', 'dev')
-  .option('-r, --region <region>', 'AWS region', process.env.AWS_REGION || 'us-west-2')
+  .option('-r, --region <region>', 'AWS region', process.env.AWS_REGION || 'us-east-1')
+  .option('-p, --profile <profile>', 'AWS profile', 'default')
   .parse(process.argv);
 
 const options = program.opts();
 const env = options.env;
 const region = options.region;
+const profile = options.profile;
 
-console.log(`Generating local development configuration for ${env} environment in ${region} region...`);
+console.log(`Generating local development configuration for ${env} environment in ${region} region using AWS profile '${profile}'...`);
 
 // Function to get CloudFormation output with retries
 function getCloudFormationOutput(stackName) {
@@ -23,7 +25,7 @@ function getCloudFormationOutput(stackName) {
   while (attempts < maxAttempts) {
     try {
       const result = execSync(
-        `aws cloudformation describe-stacks --stack-name ${stackName} --region ${region} --query "Stacks[0].Outputs" --output json`,
+        `aws cloudformation describe-stacks --stack-name ${stackName} --region ${region} --profile ${profile} --query "Stacks[0].Outputs" --output json`,
         { encoding: 'utf-8' }
       );
       return JSON.parse(result);
@@ -42,7 +44,7 @@ function getCloudFormationOutput(stackName) {
 
 try {
   // Get outputs from all stacks
-  const mainStackName = `MultimediaRagStack-${env}`;
+  const mainStackName = `MultimediaRagStack`;
   const mainStackOutputs = getCloudFormationOutput(mainStackName);
   
   // Function to find output value by export name

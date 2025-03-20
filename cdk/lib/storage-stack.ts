@@ -6,7 +6,7 @@ import { ResourceConfig, WAF_TAGS } from './constants';
 /**
  * Props for the StorageStack
  */
-export interface StorageStackProps extends cdk.StackProps {
+export interface StorageStackProps extends cdk.NestedStackProps {
   /**
    * Suffix to append to resource names
    */
@@ -22,7 +22,7 @@ export interface StorageStackProps extends cdk.StackProps {
  * - Multimodal files (for Bedrock Knowledge Base)
  * - Application hosting (React frontend files)
  */
-export class StorageStack extends cdk.Stack {
+export class StorageStack extends cdk.NestedStack {
   /**
    * S3 bucket for media file uploads
    */
@@ -54,9 +54,10 @@ export class StorageStack extends cdk.Stack {
     // Add environment tag
     cdk.Tags.of(this).add('Environment', props.resourceSuffix);
 
-    // Create the Media bucket for source files
+    // Create the Media bucket for source files with a fully explicit name
+    const uniqueId = Math.random().toString(36).substring(2, 8);
     this.mediaBucket = new s3.Bucket(this, 'MediaBucket', {
-      bucketName: `${cdk.Aws.ACCOUNT_ID}-media-bucket-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`,
+      bucketName: `media-bucket-${props.resourceSuffix}-${uniqueId}`,
       eventBridgeEnabled: true, // Enable EventBridge notifications
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED, // Enable SSE for security
@@ -78,7 +79,7 @@ export class StorageStack extends cdk.Stack {
 
     // Create the Organized bucket for processed files
     this.organizedBucket = new s3.Bucket(this, 'OrganizedBucket', {
-      bucketName: `${cdk.Aws.ACCOUNT_ID}-organized-bucket-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`,
+      bucketName: `organized-bucket-${props.resourceSuffix}-${uniqueId}`,
       eventBridgeEnabled: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -98,7 +99,7 @@ export class StorageStack extends cdk.Stack {
 
     // Create the Multimodal bucket
     this.multimodalBucket = new s3.Bucket(this, 'MultimodalBucket', {
-      bucketName: `${cdk.Aws.ACCOUNT_ID}-multimodal-bucket-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`,
+      bucketName: `multimodal-bucket-${props.resourceSuffix}-${uniqueId}`,
       eventBridgeEnabled: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -107,7 +108,7 @@ export class StorageStack extends cdk.Stack {
 
     // Create the Application Host bucket for the React frontend
     this.applicationHostBucket = new s3.Bucket(this, 'ApplicationHostBucket', {
-      bucketName: `${cdk.Aws.ACCOUNT_ID}-app-host-bucket-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`,
+      bucketName: `apphost-bucket-${props.resourceSuffix}-${uniqueId}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
@@ -119,7 +120,7 @@ export class StorageStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'MediaBucketName', {
       value: this.mediaBucket.bucketName,
       description: 'Media bucket name',
-      exportName: `${id}-MediaBucketName`
+      exportName: `StorageStack-MediaBucketName`
     });
 
     new cdk.CfnOutput(this, 'OrganizedBucketName', {

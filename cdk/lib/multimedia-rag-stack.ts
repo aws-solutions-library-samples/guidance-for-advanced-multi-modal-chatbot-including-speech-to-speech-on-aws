@@ -4,7 +4,6 @@ import { StorageStack } from './storage-stack';
 import { AuthStack } from './auth-stack';
 import { OpenSearchStack } from './opensearch-stack';
 import { ProcessingStack } from './processing-stack';
-import { CloudFrontStack } from './cloudfront-stack';
 import { ResourceConfig, WAF_TAGS } from './constants';
 
 /**
@@ -68,10 +67,6 @@ export class MultimediaRagStack extends cdk.Stack {
    */
   public readonly processingStack: ProcessingStack;
   
-  /**
-   * CloudFront Stack
-   */
-  public readonly cloudFrontStack: CloudFrontStack;
 
   constructor(scope: Construct, id: string, props: MultimediaRagStackProps) {
     super(scope, id, props);
@@ -84,23 +79,23 @@ export class MultimediaRagStack extends cdk.Stack {
     // Add environment tag
     cdk.Tags.of(this).add('Environment', props.resourceConfig.resourceSuffix);
 
-    // Deploy Storage Stack
+    // Deploy Storage Stack as a NestedStack with this parent's scope
     this.storageStack = new StorageStack(this, 'StorageStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix
     });
 
-    // Deploy Auth Stack
+    // Deploy Auth Stack as a NestedStack
     this.authStack = new AuthStack(this, 'AuthStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix
     });
 
-    // Deploy OpenSearch Stack
+    // Deploy OpenSearch Stack as a NestedStack
     this.openSearchStack = new OpenSearchStack(this, 'OpenSearchStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix,
       organizedBucket: this.storageStack.organizedBucket
     });
 
-    // Deploy Processing Stack
+    // Deploy Processing Stack as a NestedStack
     this.processingStack = new ProcessingStack(this, 'ProcessingStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix,
       modelId: props.modelId,
@@ -111,38 +106,28 @@ export class MultimediaRagStack extends cdk.Stack {
       opensearchCollection: this.openSearchStack.collection
     });
 
-    // Deploy CloudFront Stack
-    this.cloudFrontStack = new CloudFrontStack(this, 'CloudFrontStack', {
-      resourceSuffix: props.resourceConfig.resourceSuffix,
-      mediaBucket: this.storageStack.mediaBucket,
-      applicationHostBucket: this.storageStack.applicationHostBucket,
-      edgeLambdaVersionArn: props.edgeLambdaVersionArn
-    });
+    // CloudFront stack is now created separately to avoid circular dependencies
     
     // Output key information for cross-stack references
     new cdk.CfnOutput(this, 'CognitoUserPoolId', {
       value: this.authStack.userPool.userPoolId,
       description: 'Cognito User Pool ID',
-      exportName: `${id}-CognitoUserPoolId`
+      exportName: `MultimediaRagStack-CognitoUserPoolId`
     });
     
     new cdk.CfnOutput(this, 'CognitoUserPoolClientId', {
       value: this.authStack.userPoolClient.userPoolClientId,
       description: 'Cognito User Pool Client ID',
-      exportName: `${id}-CognitoUserPoolClientId` 
+      exportName: `MultimediaRagStack-CognitoUserPoolClientId` 
     });
     
     new cdk.CfnOutput(this, 'CognitoIdentityPoolId', {
       value: this.authStack.identityPool.ref,
       description: 'Cognito Identity Pool ID',
-      exportName: `${id}-CognitoIdentityPoolId`
+      exportName: `MultimediaRagStack-CognitoIdentityPoolId`
     });
     
-    new cdk.CfnOutput(this, 'CloudFrontDomainName', {
-      value: this.cloudFrontStack.distribution.distributionDomainName,
-      description: 'CloudFront Distribution Domain Name',
-      exportName: `${id}-CloudFrontDomainName`
-    });
+    // CloudFront domain name is now output from the separate CloudFront stack
     
     // Add permissions for authenticated users to invoke the retrieval function
     this.authStack.authenticatedRole.addToPolicy(
@@ -169,4 +154,6 @@ export class MultimediaRagStack extends cdk.Stack {
       })
     );
   }
+
+  // CloudFront access policies are now handled in the separate CloudFront stack
 }
