@@ -1,8 +1,8 @@
-# Chat with your multimedia content using Amazon Bedrock Data Automation and Amazon Bedrock Knowledge Bases
+# Chat with your multimedia content using AWS CDK, Amazon Bedrock Data Automation and Amazon Bedrock Knowledge Bases
 
 ## Overview
 In the era of information overload, extracting meaningful insights from diverse data sources has become increasingly challenging. This becomes particularly difficult when businesses have terabytes of video and audio files, along with text based data and need to quickly access specific sections or topics, summarize content, or answer targeted questions using information sourced from these diverse files without having to switch context or solutions. 
-This unified GenAI solution transforms how users interact with their data. This solution seamlessly integrates with various file formats including video, audio PDFs and text documents, providing a unified interface for knowledge extraction. Users can ask questions about their data, and the solution delivers precise answers, complete with source attribution. Responses are linked to their origin, which could include videos that load at the exact timestamp, for faster and efficient referance, PDF files or documents. 
+This unified GenAI solution transforms how users interact with their data. This solution seamlessly integrates with various file formats including video, audio PDFs and text documents, providing a unified interface for knowledge extraction. Users can ask questions about their data, and the solution delivers precise answers, complete with source attribution. Responses are linked to their origin, which could include videos that load at the exact timestamp, for faster and efficient reference, PDF files or documents. 
 
 This sample solution will demonstrate how to leverage AWS AI services to: 
 * Process and index multi-format data at scale, including large video, audio and documents 
@@ -11,139 +11,179 @@ This sample solution will demonstrate how to leverage AWS AI services to:
 
 https://github.com/user-attachments/assets/eabccee8-f780-43e6-ac31-064dacb48a09
 
-## Deployment Options
+## Architecture Overview
 
-This solution uses Amazon Bedrock Data Automation for data parsing and Amazon Bedrock Knowledge Bases for chunking, embedding, retrieval and answer generation.
+The application is implemented as a modular AWS CDK application with the following stack architecture:
 
-Amazon Bedrock Data Automation:
-  * Manages all content parsing
-  * Converts documents, images, video, and audio to text
-  
-### This implementation is suitable for:
-  * Processing text from common text formats, visually rich documents and images.
-  * Processing speech to text from audio or video files
-  * Processing video files without audio for complete summary and events
-  * Processing text within videos
-  * Categorizing data within files for efficient search and retrieval 
+1. **Storage Stack**
+   - Media Bucket: Secure bucket for source files
+   - Organized Bucket: Processed files destination
+   - Application Host Bucket: React frontend host
 
-## Key Storage and Processing Components
+2. **Auth Stack**
+   - Cognito User Pool for authentication
+   - Cognito Identity Pool for authorized access to AWS resources
+   - User Pool Client for application integration
 
-### S3 Buckets
-- **Media Bucket**: Secure bucket for source files
-- **Organized Bucket**: Processed files destination
-- **Application Host Bucket**: React frontend host
+3. **OpenSearch Stack**
+   - Vector database for semantic search capabilities
+   - Embedding configuration for content indexing
 
-### Lambda Functions
-1. **Initial Processing Lambda**
-   - Handles S3 uploads
-   - Triggers Bedrock Data Automation
+4. **Processing Stack**
+   - Initial Processing Lambda: Handles S3 uploads and triggers Bedrock Data Automation
+   - Output Processing Lambda: Processes Bedrock Data Automation results and converts to searchable text
+   - Retrieval Lambda: Handles user queries and response generation
+   - Bedrock Knowledge Base configuration
 
-2. **Output Processing Lambda**
-   - Processes Bedrock Data Automation results
-   - Converts JSON to timestamped text
-   - Stores in organized bucket
+5. **CloudFront Stack**
+   - Content delivery configuration
+   - Origin access controls
+   - Distribution settings
 
-3. **Retrieval Lambda**
-   - Handles user queries
-   - Manages context retrieval and response generation
+6. **Lambda Edge Stack**
+   - JWT validation at the edge
+   - Request handling for protected content
 
-## Parameters
+7. **Frontend Stack**
+   - React application build and deployment
+   - Environment configuration
+   - CloudFront integration
+
+## Key Parameters
 
 | Parameter | Description | Default/Constraints |
 |-----------|-------------|-------------------|
 | ModelId | The Amazon Bedrock supported LLM inference profile ID used for inference. | Default: "us.anthropic.claude-3-haiku-20240307-v1:0" |
 | EmbeddingModelId | The Amazon Bedrock supported embedding LLM ID used in Bedrock Knowledge Bases. | Default: "amazon.titan-embed-text-v2:0" |
-| DataParser | Bedrock Data Automation processes visually rich documents, images, videos and audio and converts to text. | Default: "Bedrock Data Automation"<br>Allowed Values: ["Bedrock Data Automation"] |
 | ResourceSuffix | Suffix to append to resource names (e.g., dev, test, prod) | - Alphanumeric characters and hyphens only<br>- Pattern: ^[a-zA-Z0-9-]*$<br>- MinLength: 1<br>- MaxLength: 20 |
-
 
 ## Features
 - Automatic media files transcription
 - Support for multiple media formats
 - Timestamped transcript generation
 - User authentication using Amazon Cognito
+- Automated deployment of both infrastructure and frontend
+- Local development with cloud resources
 
 ## Security Features
 - IAM roles with least privilege access
 - Cognito user pool for authentication
-- Cloudfront resource URLs validated using Amazon Lambda@Edge
+- CloudFront resource URLs validated using Amazon Lambda@Edge
+- Well-Architected security tagging and best practices
 
 ## Prerequisites
-- AWS CLI with credentials
+- AWS CLI with credentials configured
 - Node.js and npm
-- AWS Console access
+- AWS CDK installed (`npm install -g aws-cdk`)
+- Git (for cloning the repository)
 
 # Deployment
 
-## CloudFormation Stack Deployment
+## Option 1: Automated Deployment (Recommended)
 
-### Option A: Via AWS Console
-- Upload the template to CloudFormation console [[1]](https://community.aws/content/2bIvnZFA6jzuAK2HmBvnOHu6htb/deploy-your-web-application-with-aws-elastic-beanstalk-aws-cdk-pipelines-and-cloudfront)
-- Fill in the required parameters
-- Create stack and wait for completion
+The solution includes a comprehensive deployment script that handles all aspects of deployment:
 
-### Option B: Via AWS CLI
-aws cloudformation create-stack \
-    --stack-name chatbot-react-stack \
-    --template-body file://path/to/template.yaml \
-    --capabilities CAPABILITY_IAM \
-    --parameters ParameterKey=<key>,ParameterValue=<value>
+1. Clone the repository and navigate to the project folder:
+   ```bash
+   git clone https://github.com/yourusername/multimedia-rag-chat-assistant.git
+   cd multimedia-rag-chat-assistant
+   ```
 
-1. Using the console or CLI, deploy chatbot.yaml template first
-2. From the **Outputs** section of the deployed stack, copy **ReactAppUserPoolId**'s value
-![deploy-chatbot](https://github.com/user-attachments/assets/7aa48c93-f623-47c9-9ddf-7a870da2c359)
-3. Deploy lambda-edge.yaml template (in us-east-1 only) using the Cognito User Pool ID obtained from previous step
-4. From the **Outputs** section of the lambda-edge.yaml stack, copy **EdgeFunctionVersionARN**'s value
-![deploy-lambdaedge](https://github.com/user-attachments/assets/ead546c4-9930-433d-bb50-e02e57d8fe41)
+2. Run the deployment script:
+   ```bash
+   ./deploy.sh -e dev
+   ```
 
-## Amazon CloudFront Configuration
+This will deploy:
+- All infrastructure stacks
+- React frontend application
+- Local development configuration
 
-1. Navigate to CloudFront in the AWS Management Console
-2. Select the distribution you want to modify
-3. Go to the "Behaviors" tab
-4. Select the default behavior (Path pattern: Default (*))
-5. Click "Edit" button
-6. Scroll down to the "Function associations" section
-7. For "Origin request", select "Lambda@Edge" as Function type
-8. Provide the EdgeFunctionVersionARN obtained from the previous step
-9. Scroll to the bottom and click "Save changes"
-10. Wait for the distribution to deploy the changes (Status will change from "In Progress" to "Deployed")
-![update-cfront](https://github.com/user-attachments/assets/51d55b42-f58c-4862-bfb8-46be3b2340a7)
+### Additional Deployment Options
 
-## Frontend Configuration
-1. Navigate to the chatbot-react folder
-2. Create .env file with the following structure:
+Deploy with Lambda@Edge (JWT validation):
+```bash
+./deploy.sh -e dev -l
 ```
-      REACT_APP_LAMBDA_FUNCTION_NAME=<ReactAppLambdaFunctionName>
-      REACT_APP_S3_SOURCE=<ReactAppS3Source>
-      REACT_APP_AWS_REGION=<chatbot.yaml_deployment_region>
-      REACT_APP_USER_POOL_ID=<ReactAppUserPoolId>
-      REACT_APP_USER_POOL_CLIENT_ID=<ReactAppUserPoolClientId>
-      REACT_APP_IDENTITY_POOL_ID=<ReactAppIdentityPoolId>
-      REACT_APP_CLOUDFRONT_DOMAIN_NAME=<ReactAppCloudfrontDomainName>
-      REACT_APP_DOCUMENTS_KB_ID=<ReactAppDocumentsKbId>
-      REACT_APP_DOCUMENTS_DS_ID=<ReactAppDocumentsDsId>
+
+Deploy infrastructure only (skip frontend):
+```bash
+./deploy.sh -e dev -f
 ```
-3. Replace placeholder values with chatbot.yaml CloudFormation stack outputs
-4. Build and Deploy Frontend
-      * Install dependencies
-      ```npm install```
-      * Build the application
-      ```npm run build```
-5. Upload the contents of chatbot-react/build to <ReactAppHostBucket> Amazon S3 bucket
-![deploy-app](https://github.com/user-attachments/assets/112b08be-af4b-4619-887d-a98384b416aa)
+
+Generate local development configuration only:
+```bash
+./deploy.sh -e dev -i
+```
+
+For help and more options:
+```bash
+./deploy.sh -h
+```
+
+## Option 2: Manual CDK Deployment
+
+If you prefer to control each step of the deployment process:
+
+1. Install dependencies:
+   ```bash
+   cd cdk
+   npm ci
+   ```
+
+2. Build the CDK app:
+   ```bash
+   npm run build
+   ```
+
+3. Bootstrap your AWS environment (if not already done):
+   ```bash
+   cdk bootstrap
+   ```
+
+4. Deploy the main stack:
+   ```bash
+   cdk deploy MultimediaRagStack --context resourceSuffix=dev
+   ```
+
+5. Deploy Lambda@Edge (if needed):
+   ```bash
+   cdk deploy LambdaEdgeStack --context deployEdgeLambda=true --context resourceSuffix=dev
+   ```
+
+6. Deploy the frontend:
+   ```bash
+   cdk deploy FrontendStack --context resourceSuffix=dev
+   ```
+
+7. Generate local development configuration:
+   ```bash
+   node ./scripts/generate-local-config.js --env dev
+   ```
+
+## Local Development
+
+After deployment, you can run the React application locally while still connecting to cloud resources:
+
+1. The deployment automatically creates a `.env.local` file in the `chatbot-react` directory with all necessary environment variables.
+
+2. Start the React development server:
+   ```bash
+   cd chatbot-react
+   npm start
+   ```
+
+3. Access the application at `http://localhost:3000`
 
 ## Usage
-### Initial Setup
-1. Verify the CloudFront distribution is deployed and active
 
 ### Application Access
-1. Access the application using: `https://<ReactAppCloudFrontDomainName>.cloudfront.net/`
+1. Access the deployed application using: `https://<CloudFront-Domain-Name>.cloudfront.net/`
 2. Signup or Log in with your credentials
 3. Use the left navigation pane to:
-   a. Upload files
-   b. Initiate data sync
-   c. Monitor sync status
+   - Upload files
+   - Initiate data sync
+   - Monitor sync status
 4. Once sync is complete, start chatting with your data
 
 ### Test Guardrails
@@ -154,29 +194,24 @@ aws cloudformation create-stack \
 
 ### Test different LLMs or Inference Configuration
 1. Use the left navigation pane to select 'Inference Configuration' from the dropdown
-2. Provide a Bedrock supported model's inference profile ID (This solution works best with Anthropic Claude 3 Haiku. Other LLMs might require prompt tuning in <ReactAppLambdaFunctionName>)
+2. Provide a Bedrock supported model's inference profile ID (This solution works best with Anthropic Claude 3 Haiku. Other LLMs might require prompt tuning)
 3. Change Temperature and TopP
-4. Ask a question and test infered answer
+4. Ask a question and test inferred answer
 
 ## Data Upload Options
-1. Direct S3 Upload : Place files in the <ReactAppS3Source> bucket (Optional)
-2. Web Interface : Upload through the application's UI
-
-## Considerations
-* Keep .env file secure and never commit it to version control
-* Do not use sensitive, confidential, or critical data
-* Do not process personally identifiable information (PII)
-* Use only public data for testing and demonstration purposes
+1. Direct S3 Upload: Place files in the media bucket
+2. Web Interface: Upload through the application's UI
 
 ## Monitoring
 - CloudWatch Logs for Lambda functions and upload/sync failures
 - EventBridge rules for tracking file processing
+- CDK Stack outputs for resource information
 
 ## Limitations
-- Supports specific media file formats only (Refer Amazon Bedrock Data Automation documentation)
+- Supports specific media file formats only (Refer to Amazon Bedrock Data Automation documentation)
 - Maximum file size limitations apply based on AWS service limits
 - Single document cannot exceed 20 pages
-- Files have to be manually deleted from <ReactAppS3Source> and <OrganizedBucket> buckets and Amazon Bedrock Knowledge Basess have to be manually synced to reflect these changes.
+- Files have to be manually deleted from media and organized buckets, and Amazon Bedrock Knowledge Bases have to be manually synced to reflect these changes.
 
 ## This sample solution is intended to be used with public, non-sensitive data only
 This is a demonstration/sample solution and is not intended for production use. Please note:
@@ -192,4 +227,3 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This library is licensed under the MIT-0 License. See the LICENSE file.
-
