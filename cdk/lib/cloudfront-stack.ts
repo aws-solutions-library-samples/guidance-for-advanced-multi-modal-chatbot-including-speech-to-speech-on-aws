@@ -17,14 +17,14 @@ export interface CloudFrontStackProps extends cdk.StackProps {
   resourceSuffix: string;
   
   /**
-   * S3 bucket for media files
+   * S3 bucket name for media files
    */
-  mediaBucket: s3.Bucket;
+  mediaBucketName: string;
   
   /**
-   * S3 bucket for hosting React application
+   * S3 bucket name for hosting React application
    */
-  applicationHostBucket: s3.Bucket;
+  applicationHostBucketName: string;
   
   /**
    * Edge lambda function ARN (Optional - can be added later)
@@ -87,9 +87,34 @@ export class CloudFrontStack extends cdk.Stack {
       cookieBehavior: cloudfront.OriginRequestCookieBehavior.none()
     });
     
-    // Define origins
-    const mediaBucketOrigin = new origins.S3Origin(props.mediaBucket);
-    const appBucketOrigin = new origins.S3Origin(props.applicationHostBucket);
+    // Create an origin access identity for CloudFront to access S3
+    const oai = new cloudfront.OriginAccessIdentity(this, 'CloudFrontOAI', {
+      comment: `OAI for ${cdk.Aws.STACK_NAME}`
+    });
+
+    // Create bucket references
+    const mediaBucketDomainName = `${props.mediaBucketName}.s3.${this.region}.amazonaws.com`;
+    const appBucketDomainName = `${props.applicationHostBucketName}.s3.${this.region}.amazonaws.com`;
+    
+    // Define origins using domain names to avoid circular dependencies
+    const mediaBucketOrigin = new origins.HttpOrigin(mediaBucketDomainName, {
+      customHeaders: {
+        'x-origin-verify': 'cloudfront-access'
+      }
+    });
+    
+    const appBucketOrigin = new origins.HttpOrigin(appBucketDomainName, {
+      customHeaders: {
+        'x-origin-verify': 'cloudfront-access'
+      }
+    });
+    
+    // Output OAI for use in bucket policies
+    new cdk.CfnOutput(this, 'OriginAccessIdentityS3CanonicalUserId', {
+      value: oai.cloudFrontOriginAccessIdentityS3CanonicalUserId,
+      description: 'CloudFront Origin Access Identity S3 Canonical User ID',
+      exportName: `${id}-OaiS3CanonicalUserId`
+    });
     
     // Define default cache behavior with or without Lambda@Edge
     const defaultBehavior: cloudfront.BehaviorOptions = {
@@ -153,9 +178,13 @@ export class CloudFrontStack extends cdk.Stack {
       enableIpv6: true
     });
     
-    // Create S3 bucket policies to allow access from CloudFront
-    this.addBucketPolicy(props.mediaBucket);
-    this.addBucketPolicy(props.applicationHostBucket);
+    // Rather than adding bucket policies directly here, we'll output the CloudFront distribution ARN
+    // so it can be used elsewhere without creating a circular dependency
+    new cdk.CfnOutput(this, 'CloudFrontDistributionArn', {
+      value: `arn:aws:cloudfront::${cdk.Aws.ACCOUNT_ID}:distribution/${this.distribution.distributionId}`,
+      description: 'CloudFront Distribution ARN',
+      exportName: `${id}-CloudFrontDistributionArn`
+    });
     
     // Output the CloudFront domain name
     new cdk.CfnOutput(this, 'CloudFrontDomainName', {

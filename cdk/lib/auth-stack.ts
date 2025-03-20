@@ -7,7 +7,7 @@ import { WAF_TAGS } from './constants';
 /**
  * Props for the AuthStack
  */
-export interface AuthStackProps extends cdk.StackProps {
+export interface AuthStackProps extends cdk.NestedStackProps {
   /**
    * Suffix to append to resource names
    */
@@ -23,7 +23,7 @@ export interface AuthStackProps extends cdk.StackProps {
  * - Identity Pool for providing temporary AWS credentials
  * - IAM role for authenticated users
  */
-export class AuthStack extends cdk.Stack {
+export class AuthStack extends cdk.NestedStack {
   /**
    * Cognito User Pool for user management
    */

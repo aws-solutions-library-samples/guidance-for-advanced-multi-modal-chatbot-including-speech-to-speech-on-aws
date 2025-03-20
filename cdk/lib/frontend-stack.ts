@@ -104,8 +104,8 @@ export class FrontendStack extends cdk.Stack {
       REACT_APP_LAMBDA_FUNCTION_NAME: props.retrievalFunction
     };
     
-    // Build React app using custom resource
-    const reactBuild = this.createReactBuild(reactEnv);
+    // Skip building during deployment - React app is built externally before deployment
+    console.log('Using pre-built React app from ../../chatbot-react/build');
     
     // Create S3 deployment for React app built assets
     const frontendDeployment = new s3deploy.BucketDeployment(this, 'ReactAppDeployment', {
@@ -114,9 +114,6 @@ export class FrontendStack extends cdk.Stack {
       distribution: props.distribution,
       distributionPaths: ['/*']
     });
-    
-    // Ensure S3 deployment happens after React build
-    frontendDeployment.node.addDependency(reactBuild);
     
     // Generate local development configuration
     this.localConfigPath = this.generateLocalConfig(reactEnv);

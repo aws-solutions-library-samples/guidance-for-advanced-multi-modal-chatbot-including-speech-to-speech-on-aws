@@ -111,6 +111,11 @@ Deploy infrastructure only (skip frontend):
 ./deploy.sh -e dev -f
 ```
 
+Deploy using a specific AWS profile:
+```bash
+./deploy.sh -e dev -p my-aws-profile
+```
+
 Generate local development configuration only:
 ```bash
 ./deploy.sh -e dev -i
@@ -143,22 +148,22 @@ If you prefer to control each step of the deployment process:
 
 4. Deploy the main stack:
    ```bash
-   cdk deploy MultimediaRagStack --context resourceSuffix=dev
+   cdk deploy MultimediaRagStack --context resourceSuffix=dev --profile your-aws-profile
    ```
 
 5. Deploy Lambda@Edge (if needed):
    ```bash
-   cdk deploy LambdaEdgeStack --context deployEdgeLambda=true --context resourceSuffix=dev
+   cdk deploy LambdaEdgeStack --context deployEdgeLambda=true --context resourceSuffix=dev --profile your-aws-profile
    ```
 
 6. Deploy the frontend:
    ```bash
-   cdk deploy FrontendStack --context resourceSuffix=dev
+   cdk deploy FrontendStack --context resourceSuffix=dev --profile your-aws-profile
    ```
 
 7. Generate local development configuration:
    ```bash
-   node ./scripts/generate-local-config.js --env dev
+   node ./scripts/generate-local-config.js --env dev --profile your-aws-profile
    ```
 
 ## Local Development

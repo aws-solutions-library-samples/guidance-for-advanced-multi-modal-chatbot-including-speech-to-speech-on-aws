@@ -10,7 +10,7 @@ import { WAF_TAGS } from './constants';
 /**
  * Props for the OpenSearchStack
  */
-export interface OpenSearchStackProps extends cdk.StackProps {
+export interface OpenSearchStackProps extends cdk.NestedStackProps {
   /**
    * Suffix to append to resource names
    */
@@ -30,7 +30,7 @@ export interface OpenSearchStackProps extends cdk.StackProps {
  * - Security Policies: encryption, network, data access
  * - Custom resource for index creation
  */
-export class OpenSearchStack extends cdk.Stack {
+export class OpenSearchStack extends cdk.NestedStack {
   /**
    * OpenSearch Serverless Collection
    */
@@ -53,15 +53,16 @@ export class OpenSearchStack extends cdk.Stack {
     cdk.Tags.of(this).add('Environment', props.resourceSuffix);
 
     // Create encryption policy for OpenSearch collection
+    // Use shorter names to avoid AWS validation errors (max 32 chars)
     const encryptionPolicy = new opensearchserverless.CfnSecurityPolicy(this, 'OpenSearchEncryptionPolicy', {
-      name: `kb-encryption-policy-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`,
+      name: `kb-encrypt-${props.resourceSuffix}`,
       type: 'encryption',
       description: 'Encryption policy for Knowledge Base collection',
       policy: JSON.stringify({
         Rules: [
           {
             ResourceType: 'collection',
-            Resource: [`collection/kb-collection-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`]
+            Resource: [`collection/kb-coll-${props.resourceSuffix}`]
           }
         ],
         AWSOwnedKey: true
@@ -70,7 +71,7 @@ export class OpenSearchStack extends cdk.Stack {
 
     // Create OpenSearch Serverless Collection
     this.collection = new opensearchserverless.CfnCollection(this, 'OpenSearchCollection', {
-      name: `kb-collection-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`,
+      name: `kb-coll-${props.resourceSuffix}`,
       description: 'Collection for Amazon Bedrock Knowledge Base',
       type: 'VECTORSEARCH',
       standbyReplicas: 'DISABLED'
@@ -109,7 +110,7 @@ export class OpenSearchStack extends cdk.Stack {
               ],
               resources: [
                 this.collection.attrArn,
-                `arn:aws:aoss:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:collection/kb-collection-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`
+                `arn:aws:aoss:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:collection/kb-coll-${props.resourceSuffix}`
               ]
             })
           ]
@@ -264,7 +265,7 @@ def handler(event, context):
 
     // Create access policy for OpenSearch collection
     const accessPolicy = new opensearchserverless.CfnAccessPolicy(this, 'OpenSearchAccessPolicy', {
-      name: `kb-access-policy-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`,
+      name: `kb-access-${props.resourceSuffix}`,
       type: 'data',
       description: 'Access policy for Knowledge Base collection',
       policy: JSON.stringify([
@@ -272,14 +273,14 @@ def handler(event, context):
           Rules: [
             {
               ResourceType: 'collection',
-              Resource: [`collection/kb-collection-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`],
+              Resource: [`collection/kb-coll-${props.resourceSuffix}`],
               Permission: [
                 'aoss:*'
               ]
             },
             {
               ResourceType: 'index',
-              Resource: [`index/kb-collection-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}/*`],
+              Resource: [`index/kb-coll-${props.resourceSuffix}/*`],
               Permission: [
                 'aoss:*'
               ]
@@ -297,7 +298,7 @@ def handler(event, context):
 
     // Create network policy for OpenSearch collection
     const networkPolicy = new opensearchserverless.CfnSecurityPolicy(this, 'OpenSearchNetworkPolicy', {
-      name: `kb-network-policy-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`,
+      name: `kb-network-${props.resourceSuffix}`,
       type: 'network',
       description: 'Network policy for Knowledge Base collection',
       policy: JSON.stringify([
@@ -305,11 +306,11 @@ def handler(event, context):
           Rules: [
             {
               ResourceType: 'collection',
-              Resource: [`collection/kb-collection-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`]
+              Resource: [`collection/kb-coll-${props.resourceSuffix}`]
             },
             {
               ResourceType: 'dashboard',
-              Resource: [`collection/kb-collection-${cdk.Aws.STACK_NAME}-${props.resourceSuffix}`]
+              Resource: [`collection/kb-coll-${props.resourceSuffix}`]
             }
           ],
           AllowFromPublic: true
