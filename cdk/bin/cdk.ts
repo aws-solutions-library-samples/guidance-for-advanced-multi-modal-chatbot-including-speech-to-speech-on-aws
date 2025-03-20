@@ -3,6 +3,7 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { MultimediaRagStack } from '../lib/multimedia-rag-stack';
 import { LambdaEdgeStack } from '../lib/lambda-edge-stack';
+import { FrontendStack } from '../lib/frontend-stack';
 import { DEFAULT_MODEL_ID, DEFAULT_EMBEDDING_MODEL_ID } from '../lib/constants';
 
 const app = new cdk.App();
@@ -29,6 +30,8 @@ const mainStack = new MultimediaRagStack(app, 'MultimediaRagStack', {
 
 // Deploy the Lambda@Edge stack (must be in us-east-1)
 const edgeRegion = 'us-east-1';
+let edgeLambdaVersionArn: string | undefined;
+
 // Only deploy if explicitly requested via context
 if (app.node.tryGetContext('deployEdgeLambda') === 'true') {
   const edgeStack = new LambdaEdgeStack(app, 'LambdaEdgeStack', {
@@ -41,4 +44,28 @@ if (app.node.tryGetContext('deployEdgeLambda') === 'true') {
     },
     description: 'Lambda@Edge function for JWT validation with Cognito'
   });
+  
+  edgeLambdaVersionArn = edgeStack.edgeFunctionVersionArn;
 }
+
+// Deploy the Frontend stack
+const frontendStack = new FrontendStack(app, 'FrontendStack', {
+  resourceSuffix: resourceSuffix,
+  applicationHostBucket: mainStack.storageStack.applicationHostBucket,
+  distribution: mainStack.cloudFrontStack.distribution,
+  userPoolId: mainStack.authStack.userPool.userPoolId,
+  userPoolClientId: mainStack.authStack.userPoolClient.userPoolClientId,
+  identityPoolId: mainStack.authStack.identityPool.ref,
+  mediaBucket: mainStack.storageStack.mediaBucket.bucketName,
+  retrievalFunction: mainStack.processingStack.retrievalFunction.functionName,
+  edgeLambdaVersionArn: edgeLambdaVersionArn,
+  region: region,
+  env: { 
+    account: account, 
+    region: region 
+  },
+  description: 'Frontend deployment for the Multimedia RAG Chat Assistant'
+});
+
+// Add dependency to ensure main stack is deployed first
+frontendStack.addDependency(mainStack);
