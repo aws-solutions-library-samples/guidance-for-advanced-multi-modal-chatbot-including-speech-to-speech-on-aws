@@ -2,8 +2,9 @@
 !jest.config.js
 *.d.ts
 node_modules
-chatbot-react/node_modules
 # CDK asset staging directory
 .cdk.staging
 cdk.out
 .idea
+.env*
+chatbot-react/build

@@ -3,8 +3,6 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { MultimediaRagStack } from '../lib/multimedia-rag-stack';
 import { LambdaEdgeStack } from '../lib/lambda-edge-stack';
-import { FrontendStack } from '../lib/frontend-stack';
-import { CloudFrontStack } from '../lib/cloudfront-stack';
 import { DEFAULT_MODEL_ID, DEFAULT_EMBEDDING_MODEL_ID } from '../lib/constants';
 
 const app = new cdk.App();
@@ -20,8 +18,34 @@ if (!process.env.CDK_DEFAULT_ACCOUNT || !process.env.CDK_DEFAULT_REGION) {
 }
 
 const resourceSuffix = app.node.tryGetContext('resourceSuffix') || 'dev';
+let edgeLambdaVersionArn: string | undefined;
 
-// Deploy the main infrastructure stack (without CloudFront)
+// Define resources in dependency order
+let edgeStack: LambdaEdgeStack | undefined;
+
+// 1. Deploy Lambda@Edge stack first if requested (must be in us-east-1)
+if (app.node.tryGetContext('deployEdgeLambda') === 'true') {
+  edgeStack = new LambdaEdgeStack(app, `LambdaEdgeStack-${resourceSuffix}`, {
+    resourceSuffix: resourceSuffix,
+    // We'll update Cognito params later when we have them
+    env: {
+      account: account,
+      region: 'us-east-1'  // Lambda@Edge must be in us-east-1
+    },
+    description: 'Lambda@Edge function for JWT validation with Cognito'
+  });
+  
+  edgeLambdaVersionArn = edgeStack.edgeFunctionVersionArn;
+  
+  // Create an output with the Edge Function ARN for manual configuration
+  new cdk.CfnOutput(edgeStack, 'LambdaEdgeVersionArn', {
+    value: edgeLambdaVersionArn,
+    description: 'Lambda@Edge Function Version ARN (Add this to CloudFront manually)',
+    exportName: `LambdaEdge-VersionArn-${resourceSuffix}`
+  });
+}
+
+// 2. Deploy main infrastructure stack with Edge ARN if available
 const mainStack = new MultimediaRagStack(app, `MultimediaRagStack-${resourceSuffix}`, {
   resourceConfig: {
     resourceSuffix: resourceSuffix
@@ -29,6 +53,7 @@ const mainStack = new MultimediaRagStack(app, `MultimediaRagStack-${resourceSuff
   modelId: DEFAULT_MODEL_ID,
   embeddingModelId: DEFAULT_EMBEDDING_MODEL_ID,
   useBedrockDataAutomation: true,
+  edgeLambdaVersionArn: edgeLambdaVersionArn,
   env: { 
     account: account, 
     region: region 
@@ -36,69 +61,8 @@ const mainStack = new MultimediaRagStack(app, `MultimediaRagStack-${resourceSuff
   description: 'Multimedia RAG solution for deploying a chatbot that can interact with documents, images, audio, and video'
 });
 
-// Get bucket names from the main stack outputs
-const mediaBucketName = mainStack.storageStack.mediaBucket.bucketName;
-const applicationHostBucketName = mainStack.storageStack.applicationHostBucket.bucketName;
-
-// Deploy separate CloudFront stack
-let cloudFrontStack: CloudFrontStack | undefined;
-if (app.node.tryGetContext('skipCloudFront') !== 'true') {
-  cloudFrontStack = new CloudFrontStack(app, 'CloudFrontStack', {
-    resourceSuffix: resourceSuffix,
-    mediaBucketName: mediaBucketName,
-    applicationHostBucketName: applicationHostBucketName,
-    env: { 
-      account: account, 
-      region: region 
-    },
-    description: 'CloudFront distribution for multimedia-rag chat assistant'
-  });
-  
-  // Add a clear dependency
-  cloudFrontStack.addDependency(mainStack);
-}
-
-// Deploy the Lambda@Edge stack (must be in us-east-1)
-const edgeRegion = 'us-east-1';
-let edgeLambdaVersionArn: string | undefined;
-
-// Only deploy if explicitly requested via context
-if (app.node.tryGetContext('deployEdgeLambda') === 'true' && cloudFrontStack) {
-  const edgeStack = new LambdaEdgeStack(app, `LambdaEdgeStack-${resourceSuffix}`, {
-    resourceSuffix: resourceSuffix,
-    cognitoUserPoolId: mainStack.authStack.userPool.userPoolId,
-    cognitoRegion: region,
-    env: {
-      account: account,
-      region: edgeRegion
-    },
-    description: 'Lambda@Edge function for JWT validation with Cognito'
-  });
-  
-  edgeLambdaVersionArn = edgeStack.edgeFunctionVersionArn;
-}
-
-// Deploy the Frontend stack only if requested
-if (app.node.tryGetContext('deployFrontend') === 'true' && cloudFrontStack) {
-  const frontendStack = new FrontendStack(app, `FrontendStack-${resourceSuffix}`, {
-    resourceSuffix: resourceSuffix,
-    applicationHostBucket: mainStack.storageStack.applicationHostBucket,
-    distribution: cloudFrontStack.distribution,
-    userPoolId: mainStack.authStack.userPool.userPoolId,
-    userPoolClientId: mainStack.authStack.userPoolClient.userPoolClientId,
-    identityPoolId: mainStack.authStack.identityPool.ref,
-    mediaBucket: mediaBucketName,
-    retrievalFunction: mainStack.processingStack.retrievalFunction.functionName,
-    edgeLambdaVersionArn: edgeLambdaVersionArn,
-    region: region,
-    env: { 
-      account: account, 
-      region: region 
-    },
-    description: 'Frontend deployment for the Multimedia RAG Chat Assistant'
-  });
-
-  // Add dependency to ensure both stacks are deployed first
-  frontendStack.addDependency(mainStack);
-  frontendStack.addDependency(cloudFrontStack);
+// Add dependency for proper deployment order
+if (app.node.tryGetContext('deployEdgeLambda') === 'true' && edgeStack) {
+  // Make the main stack depend on the edge stack for proper deployment order
+  mainStack.addDependency(edgeStack);
 }

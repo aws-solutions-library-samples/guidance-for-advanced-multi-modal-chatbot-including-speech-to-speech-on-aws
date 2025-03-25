@@ -54,10 +54,8 @@ export class StorageStack extends cdk.NestedStack {
     // Add environment tag
     cdk.Tags.of(this).add('Environment', props.resourceSuffix);
 
-    // Create the Media bucket for source files with a fully explicit name
-    const uniqueId = Math.random().toString(36).substring(2, 8);
+    // Create the Media bucket for source files 
     this.mediaBucket = new s3.Bucket(this, 'MediaBucket', {
-      bucketName: `media-bucket-${props.resourceSuffix}-${uniqueId}`,
       eventBridgeEnabled: true, // Enable EventBridge notifications
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED, // Enable SSE for security
@@ -79,7 +77,6 @@ export class StorageStack extends cdk.NestedStack {
 
     // Create the Organized bucket for processed files
     this.organizedBucket = new s3.Bucket(this, 'OrganizedBucket', {
-      bucketName: `organized-bucket-${props.resourceSuffix}-${uniqueId}`,
       eventBridgeEnabled: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -99,7 +96,6 @@ export class StorageStack extends cdk.NestedStack {
 
     // Create the Multimodal bucket
     this.multimodalBucket = new s3.Bucket(this, 'MultimodalBucket', {
-      bucketName: `multimodal-bucket-${props.resourceSuffix}-${uniqueId}`,
       eventBridgeEnabled: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
@@ -108,7 +104,6 @@ export class StorageStack extends cdk.NestedStack {
 
     // Create the Application Host bucket for the React frontend
     this.applicationHostBucket = new s3.Bucket(this, 'ApplicationHostBucket', {
-      bucketName: `apphost-bucket-${props.resourceSuffix}-${uniqueId}`,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
@@ -117,11 +112,6 @@ export class StorageStack extends cdk.NestedStack {
     });
 
     // Output the bucket names and ARNs
-    new cdk.CfnOutput(this, 'MediaBucketName', {
-      value: this.mediaBucket.bucketName,
-      description: 'Media bucket name',
-      exportName: `StorageStack-MediaBucketName`
-    });
 
     new cdk.CfnOutput(this, 'OrganizedBucketName', {
       value: this.organizedBucket.bucketName,
@@ -135,10 +125,5 @@ export class StorageStack extends cdk.NestedStack {
       exportName: `${id}-MultimodalBucketName`
     });
 
-    new cdk.CfnOutput(this, 'ApplicationHostBucketName', {
-      value: this.applicationHostBucket.bucketName,
-      description: 'Application host bucket name',
-      exportName: `${id}-ApplicationHostBucketName`
-    });
   }
 }

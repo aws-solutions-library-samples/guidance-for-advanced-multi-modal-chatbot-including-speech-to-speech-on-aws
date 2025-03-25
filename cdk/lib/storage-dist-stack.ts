@@ -8,39 +8,53 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import { WAF_TAGS } from './constants';
 
 /**
- * Props for the CloudFrontStack
+ * Props for the StorageDistStack
  */
-export interface CloudFrontStackProps extends cdk.NestedStackProps {
+export interface StorageDistStackProps extends cdk.NestedStackProps {
   /**
    * Suffix to append to resource names
    */
   resourceSuffix: string;
   
   /**
-   * S3 bucket for media files
-   */
-  mediaBucket: s3.IBucket;
-  
-  /**
-   * S3 bucket for hosting React application
-   */
-  applicationHostBucket: s3.IBucket;
-  
-  /**
-   * Edge lambda function ARN (Optional - can be added later)
+   * Edge lambda function ARN (Optional - required for Auth)
    */
   edgeLambdaVersionArn?: string;
 }
 
 /**
- * CloudFront Stack for multimedia-rag application
+ * Storage and Distribution Stack for multimedia-rag application
  * 
- * This nested stack provisions:
+ * This combined stack provisions:
+ * - S3 buckets for media files, organized content, multimodal data, and application hosting
  * - CloudFront distribution for delivering web content
  * - Origin access control for S3 buckets
  * - Request policies for query string forwarding
+ * 
+ * Grouping these together eliminates circular dependencies and creates a logical unit
+ * that handles both storage and content distribution.
  */
-export class CloudFrontStack extends cdk.NestedStack {
+export class StorageDistStack extends cdk.NestedStack {
+  /**
+   * S3 bucket for media file uploads
+   */
+  public readonly mediaBucket: s3.Bucket;
+  
+  /**
+   * S3 bucket for organized processed files
+   */
+  public readonly organizedBucket: s3.Bucket;
+  
+  /**
+   * S3 bucket for multimodal data
+   */
+  public readonly multimodalBucket: s3.Bucket;
+  
+  /**
+   * S3 bucket for hosting the React application
+   */
+  public readonly applicationHostBucket: s3.Bucket;
+
   /**
    * CloudFront distribution
    */
@@ -56,7 +70,7 @@ export class CloudFrontStack extends cdk.NestedStack {
    */
   public readonly originAccessControl: cloudfront.CfnOriginAccessControl;
   
-  constructor(scope: Construct, id: string, props: CloudFrontStackProps) {
+  constructor(scope: Construct, id: string, props: StorageDistStackProps) {
     super(scope, id, props);
 
     // Add Well-Architected Framework tags to stack
@@ -67,11 +81,70 @@ export class CloudFrontStack extends cdk.NestedStack {
     // Add environment tag
     cdk.Tags.of(this).add('Environment', props.resourceSuffix);
     
+    // ======== STORAGE PART ========
+    // Create the Media bucket for source files 
+    this.mediaBucket = new s3.Bucket(this, 'MediaBucket', {
+      eventBridgeEnabled: true, // Enable EventBridge notifications
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED, // Enable SSE for security
+      enforceSSL: true, // Enforce SSL for security
+      cors: [
+        {
+          allowedHeaders: ['*'],
+          allowedMethods: [
+            s3.HttpMethods.GET,
+            s3.HttpMethods.PUT,
+            s3.HttpMethods.POST,
+            s3.HttpMethods.DELETE
+          ],
+          allowedOrigins: ['*'],
+          exposedHeaders: ['ETag']
+        }
+      ]
+    });
+
+    // Create the Organized bucket for processed files
+    this.organizedBucket = new s3.Bucket(this, 'OrganizedBucket', {
+      eventBridgeEnabled: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      lifecycleRules: [  // Cost optimization: transition objects to cheaper storage
+        {
+          enabled: true,
+          transitions: [
+            {
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: cdk.Duration.days(30)
+            }
+          ]
+        }
+      ]
+    });
+
+    // Create the Multimodal bucket
+    this.multimodalBucket = new s3.Bucket(this, 'MultimodalBucket', {
+      eventBridgeEnabled: true,
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true
+    });
+
+    // Create the Application Host bucket for the React frontend
+    this.applicationHostBucket = new s3.Bucket(this, 'ApplicationHostBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      removalPolicy: cdk.RemovalPolicy.DESTROY, // For easier cleanup during development
+      autoDeleteObjects: true // For easier cleanup during development
+    });
+
+    // ======== DISTRIBUTION PART ========
     // Create Origin Access Control for S3 buckets
-    this.originAccessControl = new cloudfront.CfnOriginAccessControl(this, 'MediaBucketCloudFrontOAC', {
+    this.originAccessControl = new cloudfront.CfnOriginAccessControl(this, 'CloudFrontOAC', {
       originAccessControlConfig: {
-        name: `${cdk.Aws.STACK_NAME}-media-bucket-oac-${props.resourceSuffix}`,
-        description: 'Origin Access Control for Media Bucket',
+        name: `multimedia-rag-bucket-oac-${props.resourceSuffix}`,
+        description: 'Origin Access Control for S3 Buckets',
         signingBehavior: 'always',
         signingProtocol: 'sigv4',
         originAccessControlOriginType: 's3'
@@ -87,13 +160,9 @@ export class CloudFrontStack extends cdk.NestedStack {
       cookieBehavior: cloudfront.OriginRequestCookieBehavior.none()
     });
     
-    // Use bucket references directly from props
-    const mediaBucket = props.mediaBucket;
-    const appBucket = props.applicationHostBucket;
-    
-    // Create S3 origins with Origin Access Control
-    const mediaBucketS3Origin = new origins.S3Origin(mediaBucket);
-    const appBucketS3Origin = new origins.S3Origin(appBucket);
+    // Create S3 origins
+    const mediaBucketS3Origin = new origins.S3Origin(this.mediaBucket);
+    const appBucketS3Origin = new origins.S3Origin(this.applicationHostBucket);
     
     // Define default cache behavior with or without Lambda@Edge
     const defaultBehavior: cloudfront.BehaviorOptions = {
@@ -177,11 +246,11 @@ export class CloudFrontStack extends cdk.NestedStack {
     }
     
     // Add bucket policies to allow CloudFront access using CDK's native methods
-    mediaBucket.addToResourcePolicy(
+    this.mediaBucket.addToResourcePolicy(
       new iam.PolicyStatement({
         actions: ['s3:GetObject'],
         principals: [new iam.ServicePrincipal('cloudfront.amazonaws.com')],
-        resources: [mediaBucket.arnForObjects('*')],
+        resources: [this.mediaBucket.arnForObjects('*')],
         conditions: {
           StringEquals: {
             'AWS:SourceArn': `arn:aws:cloudfront::${cdk.Aws.ACCOUNT_ID}:distribution/${this.distribution.distributionId}`
@@ -190,11 +259,11 @@ export class CloudFrontStack extends cdk.NestedStack {
       })
     );
     
-    appBucket.addToResourcePolicy(
+    this.applicationHostBucket.addToResourcePolicy(
       new iam.PolicyStatement({
         actions: ['s3:GetObject'],
         principals: [new iam.ServicePrincipal('cloudfront.amazonaws.com')],
-        resources: [appBucket.arnForObjects('*')],
+        resources: [this.applicationHostBucket.arnForObjects('*')],
         conditions: {
           StringEquals: {
             'AWS:SourceArn': `arn:aws:cloudfront::${cdk.Aws.ACCOUNT_ID}:distribution/${this.distribution.distributionId}`
@@ -202,27 +271,39 @@ export class CloudFrontStack extends cdk.NestedStack {
         }
       })
     );
+
+    // ======== OUTPUTS ========
+    // Storage bucket outputs
+
+    new cdk.CfnOutput(this, 'OrganizedBucketName', {
+      value: this.organizedBucket.bucketName,
+      description: 'Organized bucket name',
+      exportName: `${id}-OrganizedBucketName`
+    });
+
+    new cdk.CfnOutput(this, 'MultimodalBucketName', {
+      value: this.multimodalBucket.bucketName,
+      description: 'Multimodal bucket name',
+      exportName: `${id}-MultimodalBucketName`
+    });
     
-    // Output CloudFront Distribution ARN
+    // Distribution outputs
     new cdk.CfnOutput(this, 'CloudFrontDistributionArn', {
       value: `arn:aws:cloudfront::${cdk.Aws.ACCOUNT_ID}:distribution/${this.distribution.distributionId}`,
       description: 'CloudFront Distribution ARN',
       exportName: `${id}-CloudFrontDistributionArn`
     });
     
-    // Output the CloudFront domain name
     new cdk.CfnOutput(this, 'CloudFrontDomainName', {
       value: this.distribution.distributionDomainName,
       description: 'CloudFront Distribution Domain Name',
       exportName: `${id}-CloudFrontDomainName`
     });
     
-    // Output just the ID portion of the domain name
-    new cdk.CfnOutput(this, 'CloudFrontDomainNameId', {
-      value: this.distribution.distributionDomainName.split('.cloudfront.net')[0],
-      description: 'CloudFront Domain Name (ID only)',
-      exportName: `${id}-CloudFrontDomainNameId`
+    new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
+      value: this.distribution.distributionId,
+      description: 'CloudFront Distribution ID (for cache invalidation)',
+      exportName: `${id}-CloudFrontDistributionId`
     });
   }
-  
 }

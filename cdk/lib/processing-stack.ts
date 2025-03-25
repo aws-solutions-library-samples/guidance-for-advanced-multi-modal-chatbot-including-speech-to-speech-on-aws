@@ -144,12 +144,7 @@ export class ProcessingStack extends cdk.NestedStack {
       description: 'Retrieval Lambda Function ARN',
       exportName: `${id}-RetrievalFunctionArn`
     });
-
-    new cdk.CfnOutput(this, 'RetrievalFunctionName', {
-      value: this.retrievalFunction.functionName,
-      description: 'Retrieval Lambda Function Name',
-      exportName: `ProcessingStack-RetrievalFunctionName`
-    });
+    
   }
 
   /**

@@ -14,14 +14,14 @@ export interface LambdaEdgeStackProps extends cdk.StackProps {
   resourceSuffix: string;
   
   /**
-   * Cognito User Pool ID
+   * Cognito User Pool ID (optional - can be set later via SSM Parameter)
    */
-  cognitoUserPoolId: string;
+  cognitoUserPoolId?: string;
   
   /**
-   * Cognito Region
+   * Cognito Region (optional - defaults to stack region)
    */
-  cognitoRegion: string;
+  cognitoRegion?: string;
 }
 
 /**
@@ -86,6 +86,10 @@ export class LambdaEdgeStack extends cdk.Stack {
       })
     );
     
+    // Use region and UserPoolId with defaults
+    const cognitoRegion = props.cognitoRegion || this.region;
+    const userPoolId = props.cognitoUserPoolId || 'POOL_ID_PLACEHOLDER';
+    
     // Create Lambda@Edge function
     this.edgeFunction = new lambda.Function(this, 'EdgeFunction', {
       functionName: `cf-edge-lambda-${props.resourceSuffix}`,
@@ -100,10 +104,12 @@ import base64
 import time
 import urllib.request
 import urllib.parse
+import os
 from json import loads
 
-COGNITO_REGION = '${props.cognitoRegion}'
-USER_POOL_ID = '${props.cognitoUserPoolId}'
+# Allow overriding via environment variables
+COGNITO_REGION = os.environ.get('COGNITO_REGION', '${cognitoRegion}')
+USER_POOL_ID = os.environ.get('USER_POOL_ID', '${userPoolId}')
 JWKS_URL = f'https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{USER_POOL_ID}/.well-known/jwks.json'
 def decode_token_segments(token):
   try:

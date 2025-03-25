@@ -98,18 +98,76 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
     DEPLOY_CONTEXT="$DEPLOY_CONTEXT --context deployEdgeLambda=true"
   fi
   
-  # Deploy the stack with the appropriate context
-  echo "Deploying stack with context: $DEPLOY_CONTEXT"
-  npx cdk deploy MultimediaRagStack-$ENV $DEPLOY_CONTEXT --profile $PROFILE --require-approval=never
+  # Define main stack to deploy (StorageDistStack is now part of MultimediaRagStack)
+  STACKS="MultimediaRagStack-$ENV"
+  
+  # Add Lambda@Edge stack if specified
+  if [ "$EDGE_LAMBDA" = "true" ]; then
+    STACKS="$STACKS LambdaEdgeStack-$ENV"
+  fi
+  
+  # Note: Frontend is now deployed directly via S3 sync
+  
+  # Deploy the stacks with the appropriate context
+  echo "Deploying stacks: $STACKS"
+  echo "With context: $DEPLOY_CONTEXT"
+  npx cdk deploy $STACKS $DEPLOY_CONTEXT --profile $PROFILE --require-approval=never
   cd ..
 fi
 
-# Step 3: Generate local development configuration
+# Step 3: Generate local and production configurations
 if [ "$LOCAL_CONFIG_ONLY" = "true" ] || [ "$SKIP_INFRASTRUCTURE" = "false" ]; then
-  echo "⚙️  Generating local development configuration..."
+  echo "⚙️  Generating configurations..."
   cd cdk
   node ./scripts/generate-local-config.js --env $ENV --region $REGION --profile $PROFILE
   cd ..
+fi
+
+# Step 4: Deploy frontend to S3 if not skipped
+if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
+  echo "📤 Deploying frontend to S3..."
+  
+  # Get the S3 bucket name from StorageDistStack outputs
+  echo "🔍 Looking for application host bucket name..."
+  APP_BUCKET=$(aws cloudformation describe-stacks \
+    --stack-name MultimediaRagStack-$ENV \
+    --query "Stacks[0].Outputs[?contains(ExportName, 'ApplicationHostBucketName') || OutputKey=='ApplicationHostBucketName'].OutputValue" \
+    --output text \
+    --region $REGION \
+    --profile $PROFILE)
+  
+  if [ -z "$APP_BUCKET" ]; then
+    echo "❌ Failed to get S3 bucket name from CloudFormation outputs"
+    exit 1
+  fi
+  
+  echo "📝 Using S3 bucket: $APP_BUCKET"
+  
+  # Perform the S3 sync
+  echo "🔄 Syncing React build to S3..."
+  aws s3 sync chatbot-react/build/ s3://$APP_BUCKET/ \
+    --profile $PROFILE \
+    --delete \
+    --cache-control "max-age=3600"
+  
+  # Get CloudFront distribution ID - now in StorageDistStack inside MultimediaRagStack
+  echo "🔍 Looking for CloudFront distribution ID..."
+  CF_DIST_ID=$(aws cloudformation describe-stacks \
+    --stack-name MultimediaRagStack-$ENV \
+    --query "Stacks[0].Outputs[?contains(ExportName, 'CloudFrontDistributionId') || OutputKey=='CloudFrontDistributionId'].OutputValue" \
+    --output text \
+    --region $REGION \
+    --profile $PROFILE)
+  
+  if [ ! -z "$CF_DIST_ID" ]; then
+    echo "🌐 Creating CloudFront invalidation..."
+    aws cloudfront create-invalidation \
+      --distribution-id $CF_DIST_ID \
+      --paths "/*" \
+      --profile $PROFILE
+  else
+    echo "⚠️ CloudFront distribution ID not found, skipping cache invalidation"
+  fi
 fi
 
 echo "✅ Deployment complete!"

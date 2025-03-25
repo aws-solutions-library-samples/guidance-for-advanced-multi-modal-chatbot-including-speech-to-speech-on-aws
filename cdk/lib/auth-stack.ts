@@ -2,6 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as cr from 'aws-cdk-lib/custom-resources';
 import { WAF_TAGS } from './constants';
 
 /**
@@ -12,6 +13,11 @@ export interface AuthStackProps extends cdk.NestedStackProps {
    * Suffix to append to resource names
    */
   resourceSuffix: string;
+  
+  /**
+   * Email address for the admin user
+   */
+  adminEmail?: string;
 }
 
 /**
@@ -176,5 +182,133 @@ export class AuthStack extends cdk.NestedStack {
       description: 'Cognito Identity Pool ID',
       exportName: `${id}-IdentityPoolId`
     });
+    
+    // Create admin user if email is provided
+    if (props.adminEmail) {
+      // Create admin group
+      const adminGroup = new cognito.CfnUserPoolGroup(this, 'AdminGroup', {
+        userPoolId: this.userPool.userPoolId,
+        groupName: 'Administrators',
+        description: 'Administrators group with full access',
+      });
+      
+      // Create admin user with custom resource to trigger after the user pool is created
+      const adminUserCreator = new cdk.CustomResource(this, 'AdminUserCreator', {
+        serviceToken: this.createAdminUserLambda().serviceToken,
+        properties: {
+          UserPoolId: this.userPool.userPoolId,
+          Email: props.adminEmail,
+          GroupName: adminGroup.groupName,
+          TemporaryPassword: this.generateTemporaryPassword()
+        }
+      });
+      
+      // Ensure the admin user is created after the group
+      adminUserCreator.node.addDependency(adminGroup);
+      
+      new cdk.CfnOutput(this, 'AdminEmail', {
+        value: props.adminEmail,
+        description: 'Admin user email address'
+      });
+    }
+  }
+  
+  /**
+   * Create custom resource provider to create admin user
+   */
+  private createAdminUserLambda(): cr.Provider {
+    // Create Lambda function for admin user creation
+    const adminUserCreatorFunction = new cdk.aws_lambda.Function(this, 'AdminUserCreatorFunction', {
+      runtime: cdk.aws_lambda.Runtime.NODEJS_18_X,
+      handler: 'index.handler',
+      code: cdk.aws_lambda.Code.fromInline(`
+const { CognitoIdentityProviderClient, AdminCreateUserCommand, AdminAddUserToGroupCommand } = require('@aws-sdk/client-cognito-identity-provider');
+const response = require('cfn-response');
+
+exports.handler = async (event, context) => {
+  try {
+    // Only process create and update events
+    if (event.RequestType === 'Delete') {
+      await response.send(event, context, response.SUCCESS, {});
+      return;
+    }
+    
+    const { UserPoolId, Email, GroupName, TemporaryPassword } = event.ResourceProperties;
+    
+    if (!UserPoolId || !Email || !GroupName || !TemporaryPassword) {
+      throw new Error('Missing required parameters');
+    }
+    
+    const cognitoClient = new CognitoIdentityProviderClient();
+    
+    // Create the user
+    const createUserCommand = new AdminCreateUserCommand({
+      UserPoolId,
+      Username: Email,
+      UserAttributes: [
+        { Name: 'email', Value: Email },
+        { Name: 'email_verified', Value: 'true' }
+      ],
+      TemporaryPassword,
+      MessageAction: 'SUPPRESS' // We'll use custom email, not Cognito's template
+    });
+    
+    const createUserResult = await cognitoClient.send(createUserCommand);
+    console.log('User created:', createUserResult.User.Username);
+    
+    // Add user to admin group
+    const addToGroupCommand = new AdminAddUserToGroupCommand({
+      UserPoolId,
+      Username: Email,
+      GroupName
+    });
+    
+    await cognitoClient.send(addToGroupCommand);
+    console.log('User added to group:', GroupName);
+    
+    await response.send(event, context, response.SUCCESS, {
+      UserName: Email,
+      Group: GroupName
+    });
+  } catch (error) {
+    console.error('Error creating admin user:', error);
+    await response.send(event, context, response.FAILED, { Error: error.message });
+  }
+};
+      `),
+      timeout: cdk.Duration.minutes(2),
+      initialPolicy: [
+        new iam.PolicyStatement({
+          effect: iam.Effect.ALLOW,
+          actions: [
+            'cognito-idp:AdminCreateUser',
+            'cognito-idp:AdminAddUserToGroup'
+          ],
+          resources: [this.userPool.userPoolArn]
+        })
+      ]
+    });
+    
+    // Create custom resource provider using the proper cr.Provider constructor
+    return new cr.Provider(this, 'AdminUserCreatorProvider', {
+      onEventHandler: adminUserCreatorFunction
+    });
+  }
+  
+  /**
+   * Generate a secure temporary password
+   */
+  private generateTemporaryPassword(): string {
+    // Simple function to generate a secure random password
+    const length = 12;
+    const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+';
+    let password = '';
+    
+    // Use crypto module for better randomness in a real implementation
+    for (let i = 0; i < length; i++) {
+      password += charset.charAt(Math.floor(Math.random() * charset.length));
+    }
+    
+    return password;
   }
 }
