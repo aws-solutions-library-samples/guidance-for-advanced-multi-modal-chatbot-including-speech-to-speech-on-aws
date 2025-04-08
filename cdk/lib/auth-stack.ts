@@ -3,6 +3,8 @@ import { Construct } from 'constructs';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as cr from 'aws-cdk-lib/custom-resources';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as s3 from 'aws-cdk-lib/aws-s3';
 import { WAF_TAGS } from './constants';
 
 /**
@@ -18,6 +20,16 @@ export interface AuthStackProps extends cdk.NestedStackProps {
    * Email address for the admin user
    */
   adminEmail?: string;
+
+  /**
+   * Media bucket for source files
+   */
+  mediaBucket?: s3.Bucket;
+
+  /**
+   * Retrieval function
+   */
+  retrievalFunction?: lambda.Function;
 }
 
 /**
@@ -121,8 +133,7 @@ export class AuthStack extends cdk.NestedStack {
       ]
     });
 
-    // Create Authenticated Role with limited permissions initially
-    // (Additional permissions will be granted by other stacks)
+    // Create Authenticated Role with all required permissions from chatbot.yaml
     this.authenticatedRole = new iam.Role(this, 'ChatbotIdentityPoolAuthRole', {
       assumedBy: new iam.FederatedPrincipal(
         'cognito-identity.amazonaws.com',
@@ -137,18 +148,77 @@ export class AuthStack extends cdk.NestedStack {
         'sts:AssumeRoleWithWebIdentity'
       ),
       description: 'Role for authenticated users',
-      // Add base policies
+      // Add all policies as defined in chatbot.yaml
       inlinePolicies: {
+        // Policy 1: CognitoAccess
         CognitoAccess: new iam.PolicyDocument({
           statements: [
             new iam.PolicyStatement({
               effect: iam.Effect.ALLOW,
               actions: [
                 'cognito-identity:GetCredentialsForIdentity',
-                'cognito-identity:GetId'
               ],
               resources: [
                 `arn:aws:cognito-identity:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:identitypool/${this.identityPool.ref}`
+              ]
+            })
+          ]
+        }),
+        
+        // Policy 2: LambdaInvokePolicy - Allow invoking the retrieval function
+        LambdaInvokePolicy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'lambda:InvokeFunction'
+              ],
+              resources: props.retrievalFunction ? 
+                [props.retrievalFunction.functionArn] : 
+                [`arn:aws:lambda:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:function:*-retrieval-fn-*`]
+            })
+          ]
+        }),
+        
+        // Policy 3: AdditionalServicesPolicy - Cognito operations and S3 access
+        AdditionalServicesPolicy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'cognito-identity:GetId',
+                'cognito-identity:GetCredentialsForIdentity'
+              ],
+              resources: ['*']
+            }),
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                's3:GetObject',
+                's3:ListBucket',
+                's3:PutObject'
+              ],
+              resources: props.mediaBucket ? 
+                [props.mediaBucket.bucketArn, `${props.mediaBucket.bucketArn}/*`] :
+                [
+                  `arn:aws:s3:::*-media-bucket-*`,
+                  `arn:aws:s3:::*-media-bucket-*/*`
+                ]
+            })
+          ]
+        }),
+        
+        // Policy 4: BedrockAccess - For Bedrock operations
+        BedrockAccess: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              effect: iam.Effect.ALLOW,
+              actions: [
+                'bedrock:StartIngestionJob',
+                'bedrock:ListIngestionJobs'
+              ],
+              resources: [
+                `arn:aws:bedrock:${cdk.Aws.REGION}:${cdk.Aws.ACCOUNT_ID}:knowledge-base/*`
               ]
             })
           ]

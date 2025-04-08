@@ -8,3 +8,4 @@ cdk.out
 .idea
 .env*
 chatbot-react/build
+dist

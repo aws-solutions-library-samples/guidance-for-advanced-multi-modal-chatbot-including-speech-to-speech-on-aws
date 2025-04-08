@@ -84,18 +84,13 @@ export class MultimediaRagStack extends cdk.Stack {
       edgeLambdaVersionArn: props.edgeLambdaVersionArn
     });
     
-    // Deploy Auth Stack as a NestedStack
-    this.authStack = new AuthStack(this, 'AuthStack', {
-      resourceSuffix: props.resourceConfig.resourceSuffix
-    });
-
     // Deploy OpenSearch Stack as a NestedStack
     this.openSearchStack = new OpenSearchStack(this, 'OpenSearchStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix,
       organizedBucket: this.storageDistStack.organizedBucket
     });
 
-    // Deploy Processing Stack as a NestedStack
+    // Deploy Processing Stack as a NestedStack first to get the retrieval function
     this.processingStack = new ProcessingStack(this, 'ProcessingStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix,
       modelId: props.modelId,
@@ -104,6 +99,13 @@ export class MultimediaRagStack extends cdk.Stack {
       organizedBucket: this.storageDistStack.organizedBucket,
       multimodalBucket: this.storageDistStack.multimodalBucket,
       opensearchCollection: this.openSearchStack.collection
+    });
+    
+    // Deploy Auth Stack as a NestedStack with the retrieval function and media bucket
+    this.authStack = new AuthStack(this, 'AuthStack', {
+      resourceSuffix: props.resourceConfig.resourceSuffix,
+      mediaBucket: this.storageDistStack.mediaBucket,
+      retrievalFunction: this.processingStack.retrievalFunction
     });
     
     // Output key information for cross-stack references
@@ -144,10 +146,31 @@ export class MultimediaRagStack extends cdk.Stack {
       exportName: `ProcessingStack-RetrievalFunctionName`
     });
 
-    // CloudFront domain name is now output from the StorageDistStack
+    // Add Bedrock Knowledge Base outputs using real values from Processing Stack
+    new cdk.CfnOutput(this, 'DocumentsKnowledgeBaseId', {
+      value: this.processingStack.knowledgeBaseId,
+      description: 'Documents Knowledge Base ID',
+      exportName: `${id}-DocumentsKnowledgeBaseId`
+    });
     
-    // Note: ApplicationHostBucketName is already exported in StorageStack
+    new cdk.CfnOutput(this, 'DocumentsDataSourceId', {
+      value: this.processingStack.dataSourceId,
+      description: 'Documents Data Source ID',
+      exportName: `${id}-DocumentsDataSourceId`
+    });
+
+    new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
+      value: this.storageDistStack.distribution.distributionId,
+      description: 'CloudFront Distribution ID (for cache invalidation)',
+      exportName: `${id}-CloudFrontDistributionId`
+    });
     
+    new cdk.CfnOutput(this, 'CloudFrontDomainName', {
+      value: this.storageDistStack.distribution.distributionDomainName,
+      description: 'CloudFront Distribution Domain Name',
+      exportName: `${id}-CloudFrontDomainName`
+    });
+  
     // Add permissions for authenticated users to invoke the retrieval function
     this.authStack.authenticatedRole.addToPolicy(
       new cdk.aws_iam.PolicyStatement({

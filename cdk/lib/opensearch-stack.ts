@@ -287,7 +287,9 @@ def handler(event, context):
             }
           ],
           Principal: [
-            `arn:aws:iam::${cdk.Aws.ACCOUNT_ID}:role/${openSearchIndexFunctionRole.roleName}`
+            `arn:aws:iam::${cdk.Aws.ACCOUNT_ID}:role/${openSearchIndexFunctionRole.roleName}`,
+            // Add Bedrock Knowledge Base role
+            `arn:aws:iam::${cdk.Aws.ACCOUNT_ID}:role/kb-role-${props.resourceSuffix}`
           ]
         }
       ])

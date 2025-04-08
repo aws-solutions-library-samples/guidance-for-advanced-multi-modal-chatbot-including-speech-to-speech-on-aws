@@ -54,7 +54,8 @@ The application is implemented as a modular AWS CDK application with the followi
 | Parameter | Description | Default/Constraints |
 |-----------|-------------|-------------------|
 | ModelId | The Amazon Bedrock supported LLM inference profile ID used for inference. | Default: "us.anthropic.claude-3-haiku-20240307-v1:0" |
-| EmbeddingModelId | The Amazon Bedrock supported embedding LLM ID used in Bedrock Knowledge Bases. | Default: "amazon.titan-embed-text-v2:0" |
+| EmbeddingModelId | The Amazon Bedrock supported embedding LLM ID used in Bedrock Knowledge Base. | Default: "amazon.titan-embed-text-v2:0" |
+| DataParser | The data processing strategy to use for multimedia content. | Default: "Bedrock Data Automation" |
 | ResourceSuffix | Suffix to append to resource names (e.g., dev, test, prod) | - Alphanumeric characters and hyphens only<br>- Pattern: ^[a-zA-Z0-9-]*$<br>- MinLength: 1<br>- MaxLength: 20 |
 
 ## Features
@@ -95,11 +96,24 @@ The solution includes a comprehensive deployment script that handles all aspects
    ```
 
 This will deploy:
-- All infrastructure stacks
+- All infrastructure stacks with default options
 - React frontend application
 - Local development configuration
 
-### Additional Deployment Options
+### Deployment Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| -e ENV | Environment name for resource naming | dev |
+| -r REGION | AWS region | from AWS CLI config |
+| -p PROFILE | AWS profile name to use | default |
+| -l | Deploy Lambda@Edge functions (in us-east-1) | false |
+| -f | Skip frontend deployment (infrastructure only) | false |
+| -s | Skip infrastructure deployment (frontend only) | false |
+| -i | Generate local configuration only (no deployment) | false |
+| -h | Show help message | - |
+
+### Example Deployment Commands
 
 Deploy with Lambda@Edge (JWT validation):
 ```bash
@@ -111,9 +125,9 @@ Deploy infrastructure only (skip frontend):
 ./deploy.sh -e dev -f
 ```
 
-Deploy using a specific AWS profile:
+Deploy using a specific AWS profile and region:
 ```bash
-./deploy.sh -e dev -p my-aws-profile
+./deploy.sh -e dev -p my-aws-profile -r us-west-2
 ```
 
 Generate local development configuration only:
@@ -143,28 +157,45 @@ If you prefer to control each step of the deployment process:
 
 3. Bootstrap your AWS environment (if not already done):
    ```bash
-   cdk bootstrap
+   cdk bootstrap aws://your-account-id/your-region
    ```
 
 4. Deploy the main stack:
    ```bash
-   cdk deploy MultimediaRagStack --context resourceSuffix=dev --profile your-aws-profile
+   cdk deploy MultimediaRagStack-dev --context resourceSuffix=dev --profile your-aws-profile
    ```
 
 5. Deploy Lambda@Edge (if needed):
    ```bash
-   cdk deploy LambdaEdgeStack --context deployEdgeLambda=true --context resourceSuffix=dev --profile your-aws-profile
+   cdk deploy LambdaEdgeStack-dev --context deployEdgeLambda=true --context resourceSuffix=dev --profile your-aws-profile
    ```
 
-6. Deploy the frontend:
+6. Build the React frontend:
    ```bash
-   cdk deploy FrontendStack --context resourceSuffix=dev --profile your-aws-profile
+   cd ../chatbot-react
+   npm install
+   npm run build
    ```
 
-7. Generate local development configuration:
+7. Upload the frontend to the Application Host S3 bucket:
    ```bash
+   # Get the S3 bucket name from CloudFormation outputs
+   APP_BUCKET=$(aws cloudformation describe-stacks --stack-name MultimediaRagStack-dev --query "Stacks[0].Outputs[?OutputKey=='ApplicationHostBucket'].OutputValue" --output text --profile your-aws-profile)
+   
+   # Sync the build to S3
+   aws s3 sync build/ s3://$APP_BUCKET/ --profile your-aws-profile --delete
+   ```
+
+8. Generate local development configuration:
+   ```bash
+   cd ../cdk
    node ./scripts/generate-local-config.js --env dev --profile your-aws-profile
    ```
+
+> **Important Region Requirements**: 
+> - Bedrock Data Automation is currently available in limited regions (including us-west-2)
+> - Lambda@Edge functions must be deployed in us-east-1
+> - Make sure to deploy in a region where all required services are available
 
 ## Local Development
 
@@ -212,11 +243,79 @@ After deployment, you can run the React application locally while still connecti
 - EventBridge rules for tracking file processing
 - CDK Stack outputs for resource information
 
+## Supported File Formats
+
+The application supports various file formats through Amazon Bedrock Data Automation:
+
+**Documents:**
+- PDF (.pdf)
+- Microsoft Word (.docx)
+- Text files (.txt)
+- HTML (.html)
+
+**Images:**
+- JPEG/JPG (.jpg, .jpeg)
+- PNG (.png)
+- TIFF (.tiff, .tif)
+- WebP (.webp)
+
+**Video:**
+- MP4 (.mp4)
+- MOV (.mov)
+- WebM (.webm)
+
+**Audio:**
+- MP3 (.mp3)
+- WAV (.wav)
+- FLAC (.flac)
+- OGG (.ogg)
+- AMR (.amr)
+
+## Troubleshooting
+
+### Common Deployment Issues
+
+1. **Bedrock Data Automation API Error:**
+   - Error message: "ValidationException when calling the CreateDataAutomationProject operation: Invalid request with deprecated parameters"
+   - Solution: The Bedrock Data Automation API parameters may have changed. Update the audio standard configuration in both `processing-stack.ts` and `chatbot.yaml` with the latest API format.
+
+2. **Region Compatibility:**
+   - Error: Services not available in the selected region
+   - Solution: Bedrock Data Automation is available in limited regions. Deploy to a supported region like us-west-2.
+
+3. **CloudFront Issues:**
+   - Problem: Frontend not showing after deployment
+   - Solution: Check the CloudFront distribution status and verify the S3 bucket policy allows CloudFront access.
+
+4. **Lambda@Edge Deployment:**
+   - Error: Lambda@Edge functions failed to deploy
+   - Solution: Ensure Lambda@Edge functions are deployed in us-east-1 as required by AWS.
+
+### Missing Environment Variables
+
+If your local development environment is missing configuration:
+1. Run `./deploy.sh -e dev -i` to regenerate the configuration files without deployment
+2. Verify that `.env.local` has been created in the chatbot-react directory
+
 ## Limitations
-- Supports specific media file formats only (Refer to Amazon Bedrock Data Automation documentation)
-- Maximum file size limitations apply based on AWS service limits
-- Single document cannot exceed 20 pages
-- Files have to be manually deleted from media and organized buckets, and Amazon Bedrock Knowledge Bases have to be manually synced to reflect these changes.
+
+- **File Size Limits:** 
+  - Videos: Up to 5GB
+  - Audio: Up to 2GB
+  - Documents: Up to 20 pages or 100MB
+  - Images: Up to 50MB each
+
+- **API Limitations:**
+  - Bedrock Data Automation has quota limitations - check AWS documentation for current limits
+  - Knowledge Base sync operations can take several minutes to complete
+
+- **Regional Availability:**
+  - Bedrock Data Automation is currently available in limited regions
+  - When deploying, ensure all required services are available in your target region
+
+- **Resource Management:**
+  - Files must be manually deleted from media and organized buckets
+  - Amazon Bedrock Knowledge Bases must be manually synced to reflect deleted files
 
 ## This sample solution is intended to be used with public, non-sensitive data only
 This is a demonstration/sample solution and is not intended for production use. Please note:

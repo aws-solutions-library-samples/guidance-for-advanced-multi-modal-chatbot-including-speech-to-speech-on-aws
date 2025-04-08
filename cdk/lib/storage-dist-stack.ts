@@ -294,16 +294,5 @@ export class StorageDistStack extends cdk.NestedStack {
       exportName: `${id}-CloudFrontDistributionArn`
     });
     
-    new cdk.CfnOutput(this, 'CloudFrontDomainName', {
-      value: this.distribution.distributionDomainName,
-      description: 'CloudFront Distribution Domain Name',
-      exportName: `${id}-CloudFrontDomainName`
-    });
-    
-    new cdk.CfnOutput(this, 'CloudFrontDistributionId', {
-      value: this.distribution.distributionId,
-      description: 'CloudFront Distribution ID (for cache invalidation)',
-      exportName: `${id}-CloudFrontDistributionId`
-    });
   }
 }
