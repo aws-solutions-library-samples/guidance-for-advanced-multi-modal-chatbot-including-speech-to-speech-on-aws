@@ -1,0 +1,30 @@
+{
+  "name": "multimedia-rag-chat-assistant-cdk",
+  "version": "1.0.0",
+  "description": "CDK implementation for MultiMedia RAG Chat Assistant",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "cdk": "cdk",
+    "deploy": "cdk deploy",
+    "deploy:edge": "cdk deploy --context deployEdgeLambda=true",
+    "deploy:frontend": "cdk deploy FrontendStack",
+    "synth": "cdk synth",
+    "bootstrap": "cdk bootstrap",
+    "generate-config": "node ./scripts/generate-local-config.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "aws-cdk-lib": "^2.143.0",
+    "commander": "^11.1.0",
+    "constructs": "^10.3.0",
+    "source-map-support": "^0.5.21"
+  },
+  "devDependencies": {
+    "@types/node": "^20.9.0",
+    "aws-cdk": "^2.143.0",
+    "typescript": "~5.2.2"
+  }
+}

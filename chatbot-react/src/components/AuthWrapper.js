@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Authenticator } from '@aws-amplify/ui-react';
-import Chat from './Chat-edge';
+import Chat from './Chat';
 import Sidebar from './Sidebar';
 
 const AuthWrapper = () => {
