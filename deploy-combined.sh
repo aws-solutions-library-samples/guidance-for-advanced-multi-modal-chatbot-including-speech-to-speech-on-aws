@@ -216,12 +216,33 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
     echo "Successfully pushed Docker image to ECR: $ECR_REPO_URI:latest"
     cd ../..
     
-    # Step 2.3.3: Build and deploy NovaSonic CDK stack
+    # Step 2.3.3: Export environment variables from chatbot-react/.env for the NovaSonic backend
+    echo "=== Exporting environment variables from chatbot-react/.env ==="
+    if [ -f "../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env" ]; then
+      echo "Found .env file, exporting variables..."
+      # Export REACT_APP_* variables
+      export $(grep -v '^#' ../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep REACT_APP_ | xargs)
+      # Export USE_RAG and RAG_MODEL_ARN variables
+      export $(grep -v '^#' ../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep USE_RAG | xargs)
+      export $(grep -v '^#' ../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep RAG_MODEL_ARN | xargs)
+      
+      # Print the exported variables for debugging
+      echo "Exported environment variables:"
+      echo "REACT_APP_DOCUMENTS_KB_ID: $REACT_APP_DOCUMENTS_KB_ID"
+      echo "REACT_APP_AWS_REGION: $REACT_APP_AWS_REGION"
+      echo "USE_RAG: $USE_RAG"
+      echo "RAG_MODEL_ARN: $RAG_MODEL_ARN"
+    else
+      echo "Warning: .env file not found in ../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/"
+    fi
+    
+    # Step 2.3.4: Build and deploy NovaSonic CDK stack
     echo "=== Building and deploying NovaSonic stack ==="
     cd novasonic/infrastructure
     # Set CDK_DEFAULT_REGION to ensure CDK uses the correct region
     export CDK_DEFAULT_REGION=us-east-1
     echo "Setting CDK_DEFAULT_REGION to us-east-1"
+    
     # Remove any existing context file that might override region settings
     rm -f cdk.context.json
     npm install

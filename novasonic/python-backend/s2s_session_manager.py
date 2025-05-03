@@ -15,7 +15,8 @@ from smithy_aws_core.credentials_resolvers.environment import EnvironmentCredent
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
-DEBUG = False
+# Enable debugging for troubleshooting
+DEBUG = True
 
 def debug_print(message):
     """Print only if debug mode is enabled"""
@@ -414,31 +415,126 @@ class S2sSessionManager:
         self.close()
 
     async def processToolUse(self, toolName, toolUseContent):
-        """Return the tool result"""
+        """
+        Process tool use requests and return results
+        
+        Args:
+            toolName (str): The name of the tool to use
+            toolUseContent (dict): The content of the tool use request
+            
+        Returns:
+            dict: The result of the tool use
+        """
+        print(f"Processing tool use: {toolName}")
         print(f"Tool Use Content: {toolUseContent}")
+        print(f"Environment variables: KB_ID={os.environ.get('REACT_APP_DOCUMENTS_KB_ID')}, KB_REGION={os.environ.get('REACT_APP_AWS_REGION')}, BACKEND_REGION={os.environ.get('AWS_DEFAULT_REGION')}, USE_RAG={os.environ.get('USE_RAG')}")
 
+        # Extract query from tool use content
         query = None
         if toolUseContent.get("content"):
-            # Parse the JSON string in the content field
-            query_json = json.loads(toolUseContent.get("content"))
-            query = query_json.get("argName1", "")
-            print(f"Extracted query: {query}")
+            try:
+                # Parse the JSON string in the content field
+                content_str = toolUseContent.get("content")
+                print(f"Raw content string: {content_str}")
+                
+                # Try to parse as JSON
+                try:
+                    query_json = json.loads(content_str)
+                    print(f"Parsed JSON: {query_json}")
+                    
+                    # Try different possible parameter names
+                    # First check for "query" (standard name)
+                    # Then check for "argName1" (alternative name)
+                    # Then check for any key that contains "query" in its name
+                    query = query_json.get("query")
+                    print(f"Checking for 'query' parameter: {query}")
+                    
+                    if query is None:
+                        query = query_json.get("argName1")
+                        print(f"Checking for 'argName1' parameter: {query}")
+                    
+                    if query is None:
+                        # Try to find any key that contains "query" in its name
+                        for key in query_json.keys():
+                            if "query" in key.lower():
+                                query = query_json.get(key)
+                                print(f"Found query in key {key}: {query}")
+                                break
+                    
+                    print(f"Final extracted query: {query}")
+                except json.JSONDecodeError:
+                    # If not valid JSON, try to extract directly from the string
+                    print("Not valid JSON, trying to extract query directly from string")
+                    if "query" in content_str.lower():
+                        # Try to extract query from string like "query=something" or "query: something"
+                        import re
+                        match = re.search(r'query[=:]\s*([^&\n]+)', content_str, re.IGNORECASE)
+                        if match:
+                            query = match.group(1).strip()
+                            print(f"Extracted query from string: {query}")
+                
+            except Exception as e:
+                print(f"Error parsing tool content: {str(e)}")
+                import traceback
+                print(traceback.format_exc())
+                # Set a default query if parsing fails
+                query = "amazon community policy"
+                print(f"Using default query due to parsing error: {query}")
+        else:
+            print("No content field found in toolUseContent")
         
         if toolName == "getKbTool":
             if not query:
                 query = "amazon community policy"
+                print(f"Using default query: {query}")
             
             # Check if we should use RAG (retrieve and generate) or just retrieve
             use_rag = os.environ.get('USE_RAG', 'false').lower() == 'true'
+            print(f"USE_RAG setting: {use_rag}")
             
-            if use_rag:
-                # Use the enhanced RAG capabilities
-                result = kb.retrieve_and_generation(query)
-                return { "result": result }
-            else:
-                # Use the basic retrieval
-                result = kb.retrieve_kb(query)
-                return { "result": result }
+            # Check if knowledge base ID is set
+            kb_id = os.environ.get('REACT_APP_DOCUMENTS_KB_ID')
+            if not kb_id:
+                error_msg = "Knowledge Base ID not configured (REACT_APP_DOCUMENTS_KB_ID environment variable not set)"
+                print(error_msg)
+                return { "result": error_msg }
+            
+            # Check if knowledge base region is set
+            kb_region = os.environ.get('REACT_APP_AWS_REGION')
+            backend_region = os.environ.get('AWS_DEFAULT_REGION', 'us-east-1')
+            if kb_region and kb_region != backend_region:
+                print(f"Cross-region operation: Knowledge Base in {kb_region}, Backend in {backend_region}")
+            
+            print(f"Final Knowledge Base configuration:")
+            print(f"  - KB ID: {kb_id}")
+            print(f"  - KB Region: {kb_region}")
+            print(f"  - Backend Region: {backend_region}")
+            print(f"  - Use RAG: {use_rag}")
+            print(f"  - RAG Model ARN: {os.environ.get('RAG_MODEL_ARN')}")
+            
+            try:
+                if use_rag:
+                    # Use the enhanced RAG capabilities
+                    print(f"Calling retrieve_and_generation with query: {query}")
+                    results = kb.retrieve_and_generation(query)
+                    print(f"RAG results count: {len(results) if results else 0}")
+                    if results:
+                        print(f"RAG first result preview: {results[0][:100] if results[0] else 'None'}...")
+                    return { "result": "\n\n".join(results) if results else "No results found." }
+                else:
+                    # Use the basic retrieval
+                    print(f"Calling retrieve_kb with query: {query}")
+                    results = kb.retrieve_kb(query)
+                    print(f"Basic retrieval results count: {len(results) if results else 0}")
+                    if results:
+                        print(f"Basic retrieval first result preview: {results[0][:100] if results[0] else 'None'}...")
+                    return { "result": "\n\n".join(results) if results else "No results found." }
+            except Exception as e:
+                error_msg = f"Error in knowledge base retrieval: {str(e)}"
+                print(error_msg)
+                import traceback
+                print(traceback.format_exc())
+                return { "result": error_msg }
         
         if toolName == "getDateTool":
             from datetime import datetime, timezone

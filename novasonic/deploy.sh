@@ -24,7 +24,27 @@ if ! command -v docker &> /dev/null; then
     exit 1
 fi
 
-# Step 1: Install dependencies for infrastructure
+# Step 1: Export environment variables from chatbot-react/.env
+echo "=== Exporting environment variables from chatbot-react/.env ==="
+if [ -f "../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env" ]; then
+    echo "Found .env file, exporting variables..."
+    # Export REACT_APP_* variables
+    export $(grep -v '^#' ../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep REACT_APP_ | xargs)
+    # Export USE_RAG and RAG_MODEL_ARN variables
+    export $(grep -v '^#' ../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep USE_RAG | xargs)
+    export $(grep -v '^#' ../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep RAG_MODEL_ARN | xargs)
+    
+    # Print the exported variables for debugging
+    echo "Exported environment variables:"
+    echo "REACT_APP_DOCUMENTS_KB_ID: $REACT_APP_DOCUMENTS_KB_ID"
+    echo "REACT_APP_AWS_REGION: $REACT_APP_AWS_REGION"
+    echo "USE_RAG: $USE_RAG"
+    echo "RAG_MODEL_ARN: $RAG_MODEL_ARN"
+else
+    echo "Warning: .env file not found in ../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/"
+fi
+
+# Step 2: Install dependencies for infrastructure
 echo "=== Installing infrastructure dependencies ==="
 cd infrastructure
 npm install

@@ -43,15 +43,39 @@ export class NovaSonicStack extends cdk.Stack {
       assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com')
     });
     
-    // Add Bedrock permissions
+    // Add Bedrock permissions for bidirectional streaming
     taskRole.addToPolicy(new iam.PolicyStatement({
       actions: [
         'bedrock:InvokeModel',
         'bedrock:InvokeModelWithResponseStream',
-        'bedrock:InvokeModelWithBidirectionalStream'
+        'bedrock:InvokeModelWithBidirectionalStream',
+        'bedrock:RetrieveAndGenerate',  // Added this permission for RAG operations
+        'bedrock:GetModelCustomizationJob',
+        'bedrock:ListFoundationModels',
+        'bedrock:ListModelCustomizationJobs'
       ],
       resources: ['*']
     }));
+    
+        // Add Bedrock Agent Runtime permissions for knowledge base operations
+        // This is needed for cross-region knowledge base access
+        taskRole.addToPolicy(new iam.PolicyStatement({
+          actions: [
+            'bedrock-agent-runtime:Retrieve',
+            'bedrock-agent-runtime:RetrieveAndGenerate'
+          ],
+          resources: ['*']
+        }));
+        
+        // Add Cognito permissions for token validation
+        taskRole.addToPolicy(new iam.PolicyStatement({
+          actions: [
+            'cognito-idp:GetUser',
+            'cognito-idp:DescribeUserPool',
+            'cognito-idp:DescribeUserPoolClient'
+          ],
+          resources: ['*']
+        }));
     
     // Add CloudWatch permissions
     taskRole.addToPolicy(new iam.PolicyStatement({
@@ -77,7 +101,23 @@ export class NovaSonicStack extends cdk.Stack {
         HOST: '0.0.0.0',
         WS_PORT: '8081',
         HEALTH_PORT: '8082',
-        AWS_DEFAULT_REGION: 'us-east-1'  // Explicitly set the region for AWS SDK
+        AWS_DEFAULT_REGION: 'us-east-1',  // Explicitly set the region for AWS SDK
+        
+        // Knowledge Base integration environment variables
+        // These will be populated during deployment from the chatbot-react/.env file
+        REACT_APP_DOCUMENTS_KB_ID: process.env.REACT_APP_DOCUMENTS_KB_ID || '',
+        REACT_APP_AWS_REGION: process.env.REACT_APP_AWS_REGION || 'us-east-1',
+        USE_RAG: process.env.USE_RAG || 'true',
+        RAG_MODEL_ARN: process.env.RAG_MODEL_ARN || 'anthropic.claude-3-haiku-20240307-v1:0',
+        
+        // Cognito configuration for authentication
+        REACT_APP_USER_POOL_ID: process.env.REACT_APP_USER_POOL_ID || '',
+        REACT_APP_USER_POOL_CLIENT_ID: process.env.REACT_APP_USER_POOL_CLIENT_ID || '',
+        REACT_APP_IDENTITY_POOL_ID: process.env.REACT_APP_IDENTITY_POOL_ID || '',
+        
+        // Enable debugging
+        DEBUG: 'true',
+        LOGLEVEL: 'DEBUG'
       },
       portMappings: [
         { containerPort: 8081 },  // Main WebSocket port
