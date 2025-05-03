@@ -1,0 +1,10 @@
+websockets==15.0.1
+boto3==1.37.17
+aws_sdk_bedrock_runtime
+smithy-aws-core
+requests==2.31.0
+numpy==2.2.4
+scipy==1.15.2
+rx==3.2.0
+pyjwt==2.6.0
+cryptography>=39.0.1
