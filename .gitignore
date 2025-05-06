@@ -6,7 +6,6 @@ yarn-error.log*
 yarn.lock
 
 # TypeScript/JavaScript
-*.js
 !jest.config.js
 *.d.ts
 *.js.map
