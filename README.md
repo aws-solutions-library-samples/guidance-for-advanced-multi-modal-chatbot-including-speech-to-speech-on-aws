@@ -324,6 +324,126 @@ We recommend creating a Budget through AWS Cost Explorer to help manage costs. P
   - Files must be manually deleted from media and organized buckets
   - Amazon Bedrock Knowledge Bases must be manually synced to reflect deleted files
 
+## Cleanup
+
+When you're done experimenting with this solution, follow these steps to remove all deployed resources and avoid ongoing charges.
+
+### Automated Cleanup Process
+
+1. **Empty S3 buckets first** (required before stack deletion):
+
+   ```bash
+   # Get bucket names from CloudFormation outputs (replace 'dev' with your environment name)
+   MEDIA_BUCKET=$(aws cloudformation describe-stacks \
+     --stack-name "MultimediaRagStack-dev" \
+     --query "Stacks[0].Outputs[?OutputKey=='MediaBucketName'].OutputValue" \
+     --output text \
+     --region <your-region> \
+     --profile <your-profile>)
+   
+   ORGANIZED_BUCKET=$(aws cloudformation describe-stacks \
+     --stack-name "MultimediaRagStack-dev" \
+     --query "Stacks[0].Outputs[?OutputKey=='OrganizedBucketName'].OutputValue" \
+     --output text \
+     --region <your-region> \
+     --profile <your-profile>)
+   
+   APP_BUCKET=$(aws cloudformation describe-stacks \
+     --stack-name "MultimediaRagStack-dev" \
+     --query "Stacks[0].Outputs[?OutputKey=='ApplicationHostBucketName'].OutputValue" \
+     --output text \
+     --region <your-region> \
+     --profile <your-profile>)
+   
+   # Empty all buckets
+   aws s3 rm s3://$MEDIA_BUCKET --recursive
+   aws s3 rm s3://$ORGANIZED_BUCKET --recursive
+   aws s3 rm s3://$APP_BUCKET --recursive
+   ```
+
+2. **Delete the main CloudFormation stack**:
+
+   ```bash
+   # Navigate to the CDK directory
+   cd cdk
+   
+   # Destroy the main stack (replace 'dev' with your environment name)
+   npx cdk destroy MultimediaRagStack-dev --profile <your-profile> --region <your-region> --force
+   ```
+
+3. **Delete Lambda@Edge stack** (if you deployed it):
+
+   ```bash
+   # Lambda@Edge functions are always deployed in us-east-1
+   npx cdk destroy LambdaEdgeStack-dev --profile <your-profile> --region us-east-1 --force
+   ```
+
+### Resources Requiring Manual Deletion
+
+Some AWS resources may require manual deletion through the AWS Console:
+
+1. **Amazon Bedrock Knowledge Base**:
+   - Navigate to Amazon Bedrock console → Knowledge bases
+   - Select the knowledge base (name contains `docs-kb-{environment}`)
+   - Click "Delete"
+
+2. **ECR Repository** (if Speech-to-Speech was enabled):
+   - Navigate to Amazon ECR console in us-east-1 region
+   - Select repository named `speech-to-speech-backend-{environment}`
+   - Click "Delete repository"
+
+3. **CloudWatch Log Groups**:
+   - Navigate to CloudWatch console → Log groups
+   - Delete log groups with names containing your environment suffix:
+     - `/aws/lambda/retrieval-fn-{environment}`
+     - `/aws/lambda/init-processing-{environment}`
+     - `/aws/lambda/bda-processor-{environment}`
+     - `/ecs/speech-to-speech-backend-{environment}` (if Speech-to-Speech was enabled)
+
+4. **OpenSearch Serverless Collection** (if stuck in deletion):
+   - If the OpenSearch collection remains stuck in "DELETING" state
+   - Contact AWS Support for assistance
+
+### Cross-Region Resource Cleanup
+
+If you deployed with Speech-to-Speech or Lambda@Edge enabled, ensure you check both your deployment region and us-east-1:
+
+- **Lambda@Edge**: Functions are deployed to us-east-1, and replicas are created in all CloudFront edge locations (replicas are automatically cleaned up by AWS, but may take several hours)
+- **Speech-to-Speech**: ECR Repository, ECS Fargate Task, and NLB are in us-east-1
+
+### Troubleshooting Stack Deletion
+
+If stack deletion fails:
+
+1. **Check the CloudFormation Events tab** for the specific resource causing the failure
+2. **Verify all S3 buckets are empty** as this is the most common cause of deletion failure
+3. **Check for resource dependencies** that might prevent deletion
+4. **Delete resources manually** through their respective AWS Console pages as needed
+5. **Try the CDK destroy command again** with the `--force` flag
+
+### Verification
+
+After completing the cleanup, verify the following resources have been deleted:
+
+- S3 buckets (Media, Organized, Application Host, and Logs)
+- CloudFront distribution
+- Lambda functions
+- OpenSearch Serverless collection
+- Bedrock Knowledge Base
+- Cognito User Pool and Identity Pool
+- Network Load Balancer (if Speech-to-Speech was enabled)
+- ECS Clusters and Services (if Speech-to-Speech was enabled)
+- ECR Repository (if Speech-to-Speech was enabled)
+- CloudWatch Log groups
+
+### Cost Optimization During Testing
+
+If you want to temporarily reduce costs without completely removing the solution:
+
+1. **Delete the Knowledge Base data source** to stop Bedrock indexing charges
+2. **Scale down the Speech-to-Speech Fargate service** to 0 tasks
+3. **Empty the S3 buckets** to reduce storage costs
+
 ## This sample solution is intended to be used with public, non-sensitive data only
 This is a demonstration/sample solution and is not intended for production use. Please note:
 - Do not use sensitive, confidential, or critical data
@@ -338,3 +458,6 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This library is licensed under the MIT-0 License. See the LICENSE file.
+
+## Notices
+Customers are responsible for making their own independent assessment of the information in this Guidance. This Guidance: (a) is for informational purposes only, (b) represents AWS current product offerings and practices, which are subject to change without notice, and (c) does not create any commitments or assurances from AWS and its affiliates, suppliers or licensors. AWS products or services are provided “as is” without warranties, representations, or conditions of any kind, whether express or implied. AWS responsibilities and liabilities to its customers are controlled by AWS agreements, and this Guidance is not part of, nor does it modify, any agreement between AWS and its customers.
