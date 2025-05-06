@@ -78,7 +78,7 @@ const mainStack = new MultimediaRagStack(app, `MultimediaRagStack-${resourceSuff
     account: account, 
     region: region 
   },
-  description: 'Multimedia RAG solution for deploying a chatbot that can interact with documents, images, audio, and video'
+  description: 'Multimedia RAG solution for deploying a chatbot that can interact with documents, images, audio, and video (SO9024)'
 });
 
 // Add dependency for proper deployment order
