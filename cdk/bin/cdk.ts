@@ -3,6 +3,7 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { MultimediaRagStack } from '../lib/multimedia-rag-stack';
 import { LambdaEdgeStack } from '../lib/lambda-edge-stack';
+import { SpeechToSpeechStack } from '../lib/speech-to-speech-stack';
 import { DEFAULT_MODEL_ID, DEFAULT_EMBEDDING_MODEL_ID } from '../lib/constants';
 
 const app = new cdk.App();
@@ -45,6 +46,17 @@ if (app.node.tryGetContext('deployEdgeLambda') === 'true') {
   });
 }
 
+// Check if Speech-to-Speech is requested and region is us-east-1
+const deploySpeechToSpeech = 
+  app.node.tryGetContext('deploySpeechToSpeech') === 'true' && 
+  region === 'us-east-1';
+
+// If Speech-to-Speech is enabled, the whole stack must be in us-east-1
+if (app.node.tryGetContext('deploySpeechToSpeech') === 'true' && region !== 'us-east-1') {
+  console.warn('Warning: Speech-to-Speech features can only be deployed in us-east-1 region.');
+  console.warn('Set CDK_DEFAULT_REGION=us-east-1 to deploy with Speech-to-Speech support.');
+}
+
 // 2. Deploy main infrastructure stack with Edge ARN if available
 const mainStack = new MultimediaRagStack(app, `MultimediaRagStack-${resourceSuffix}`, {
   resourceConfig: {
@@ -54,6 +66,14 @@ const mainStack = new MultimediaRagStack(app, `MultimediaRagStack-${resourceSuff
   embeddingModelId: DEFAULT_EMBEDDING_MODEL_ID,
   useBedrockDataAutomation: true,
   edgeLambdaVersionArn: edgeLambdaVersionArn,
+  // Pass Speech-to-Speech configuration
+  deploySpeechToSpeech: deploySpeechToSpeech,
+  speechToSpeechConfig: {
+    ecrRepositoryName: `speech-to-speech-backend-${resourceSuffix}`,
+    debugMode: app.node.tryGetContext('debugMode') === 'true',
+  },
+  // Allow specifying an external log bucket for higher security
+  externalLogBucketArn: app.node.tryGetContext('externalLogBucketArn'),
   env: { 
     account: account, 
     region: region 

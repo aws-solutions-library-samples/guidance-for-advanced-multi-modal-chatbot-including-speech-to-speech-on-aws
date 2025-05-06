@@ -8,6 +8,7 @@ This sample solution will demonstrate how to leverage AWS AI services to:
 * Process and index multi-format data at scale, including large video, audio and documents 
 * Rapidly summarize extensive content from various file types 
 * Deliver context-rich responses Provide an unified, intuitive user experience for seamless data exploration
+* Engage in real-time speech-to-speech conversations with your knowledge base (optional)
 
 https://github.com/user-attachments/assets/eabccee8-f780-43e6-ac31-064dacb48a09
 
@@ -49,6 +50,12 @@ The application is implemented as a modular AWS CDK application with the followi
    - Environment configuration
    - CloudFront integration
 
+8. **Speech-to-Speech Stack (Optional)**
+   - WebSocket server for real-time audio streaming
+   - Amazon Nova Sonic integration for speech-to-speech capabilities
+   - ECS Fargate service with Docker container
+   - Network Load Balancer for WebSocket connections
+
 ## Key Parameters
 
 | Parameter | Description | Default/Constraints |
@@ -65,6 +72,8 @@ The application is implemented as a modular AWS CDK application with the followi
 - User authentication using Amazon Cognito
 - Automated deployment of both infrastructure and frontend
 - Local development with cloud resources
+- Real-time speech-to-speech conversations with your knowledge base (optional)
+- WebSocket-based communication for low-latency voice responses
 
 ## Security Features
 - IAM roles with least privilege access
@@ -77,6 +86,7 @@ The application is implemented as a modular AWS CDK application with the followi
 - Node.js and npm
 - AWS CDK installed (`npm install -g aws-cdk`)
 - Git (for cloning the repository)
+- Docker (for building the Speech-to-Speech container)
 
 # Deployment
 
@@ -111,37 +121,72 @@ This will deploy:
 | -f | Skip frontend deployment (infrastructure only) | false |
 | -s | Skip infrastructure deployment (frontend only) | false |
 | -i | Generate local configuration only (no deployment) | false |
+| -S | Disable Speech-to-Speech capabilities | false (enabled by default) |
 | -h | Show help message | - |
 
 ### Example Deployment Commands
 
-Deploy with Lambda@Edge (JWT validation):
+#### Complete Production Deployment (with all features)
 ```bash
-./deploy.sh -e dev -l
+# Deploy a production environment with all features enabled
+./deploy.sh -e prod -r us-east-1 -l
 ```
+**Explanation**: This command deploys the complete solution with both Lambda@Edge JWT validation and Speech-to-Speech capabilities in a production environment. Using `us-east-1` region ensures Speech-to-Speech capabilities are available, while the `-l` flag enables CloudFront JWT validation for enhanced security.
 
-Deploy infrastructure only (skip frontend):
+#### Development Environment in Non-us-east-1 Region
 ```bash
-./deploy.sh -e dev -f
+# Deploy a development environment in us-west-2 (Speech-to-Speech will be automatically disabled)
+./deploy.sh -e dev -r us-west-2
 ```
+**Explanation**: This deploys the solution in us-west-2 region for development. The Speech-to-Speech capabilities will be automatically disabled since they're only available in us-east-1, but all other features will function normally.
 
-Deploy using a specific AWS profile and region:
+#### Minimal Deployment (for testing)
 ```bash
-./deploy.sh -e dev -p my-aws-profile -r us-west-2
+# Deploy basic infrastructure without Speech-to-Speech and frontend for testing
+./deploy.sh -e test -S -f
 ```
+**Explanation**: This creates a minimal testing deployment with only the core infrastructure. The frontend deployment is skipped (`-f`) and Speech-to-Speech capabilities are disabled (`-S`), making this ideal for quick testing of backend components.
 
-Generate local development configuration only:
+#### Update Frontend Only
 ```bash
-./deploy.sh -e dev -i
+# Update only the frontend without redeploying infrastructure
+./deploy.sh -e dev -s
 ```
-3. Replace placeholder values with chatbot.yaml CloudFormation stack outputs
-4. Build and Deploy Frontend
-      * Install dependencies
-      ```npm install```
-      * Build the application
-      ```npm run build```
-5. Upload the contents of chatbot-react/build to ```< ReactAppHostBucket>``` Amazon S3 bucket
-![deploy-app](https://github.com/user-attachments/assets/112b08be-af4b-4619-887d-a98384b416aa)
+**Explanation**: When you've made changes only to the frontend code and want to update it without redeploying the infrastructure stacks. This is much faster than a full deployment.
+
+#### Cross-Account Deployment with Custom Profile
+```bash
+# Deploy to a different AWS account using a specific profile
+./deploy.sh -e staging -p staging-account -r us-east-1
+```
+**Explanation**: This example demonstrates using a custom AWS profile to deploy to a separate AWS account, which is common in enterprise environments with development/staging/production in separate accounts.
+
+#### Secure Production Deployment
+```bash
+# Deploy a production environment with all security features
+./deploy.sh -e prod -r us-east-1 -l -p production-profile
+```
+**Explanation**: This deploys a secure production environment with Lambda@Edge for JWT validation, using a dedicated production AWS profile. The deployment uses us-east-1 to enable all features including Speech-to-Speech.
+
+#### Local Development Configuration
+```bash
+# Generate configuration files for local development without deploying 
+./deploy.sh -e dev -i -p dev-profile
+```
+**Explanation**: This generates the necessary environment configuration for local development against existing cloud resources without deploying any infrastructure. Useful for frontend developers who don't need to deploy infrastructure changes.
+
+## Speech-to-Speech Capabilities
+
+This solution includes optional integration with Amazon Nova Sonic for real-time speech-to-speech conversations with your knowledge base:
+
+- **Real-time bidirectional audio streaming**: Talk naturally with your data using voice
+- **Voice-based RAG**: Query your multimedia content knowledge base using spoken language
+- **WebSocket communication**: Low-latency responses through WebSocket protocol
+- **Seamless integration**: Uses the same knowledge base as the text chat interface
+
+The speech-to-speech capability is deployed by default when using `us-east-1` region. To disable it, use the `-S` flag during deployment.
+
+**IMPORTANT**: Speech-to-Speech capabilities using Amazon Nova Sonic are currently only available in the **us-east-1** (N. Virginia) region. When deploying in other regions, the Speech-to-Speech capability will be automatically disabled.
 
 ## Usage
 
@@ -152,7 +197,7 @@ Generate local development configuration only:
    - Upload files
    - Initiate data sync
    - Monitor sync status
-4. Once sync is complete, start chatting with your data
+4. Once sync is complete, start chatting with your data (via text or speech)
 
 ### Test Guardrails
 1. Create Guardrails from the Amazon Bedrock Console or obtain existing Guardrail ID and version
@@ -174,6 +219,7 @@ Generate local development configuration only:
 - CloudWatch Logs for Lambda functions and upload/sync failures
 - EventBridge rules for tracking file processing
 - CDK Stack outputs for resource information
+- CloudWatch dashboards for monitoring Speech-to-Speech service performance
 
 ## Supported File Formats
 
@@ -223,6 +269,10 @@ The application supports various file formats through Amazon Bedrock Data Automa
    - Error: Lambda@Edge functions failed to deploy
    - Solution: Ensure Lambda@Edge functions are deployed in us-east-1 as required by AWS.
 
+5. **Speech-to-Speech Issues:**
+   - Error: Speech-to-Speech stack deployment failed
+   - Solution: Verify you are deploying in us-east-1 region, as Nova Sonic is currently only available there.
+
 ### Missing Environment Variables
 
 If your local development environment is missing configuration:
@@ -242,7 +292,8 @@ If your local development environment is missing configuration:
   - Knowledge Base sync operations can take several minutes to complete
 
 - **Regional Availability:**
-  - Bedrock Data Automation is currently available in limited regions
+  - Bedrock Data Automation is available in limited regions
+  - Speech-to-Speech capabilities using Amazon Nova Sonic are currently only available in us-east-1 region
   - When deploying, ensure all required services are available in your target region
 
 - **Resource Management:**

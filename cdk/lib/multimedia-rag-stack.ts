@@ -4,6 +4,7 @@ import { StorageDistStack } from './storage-dist-stack';
 import { AuthStack } from './auth-stack';
 import { OpenSearchStack } from './opensearch-stack';
 import { ProcessingStack } from './processing-stack';
+import { SpeechToSpeechStack } from './speech-to-speech-stack';
 import { ResourceConfig, WAF_TAGS } from './constants';
 
 /**
@@ -34,6 +35,27 @@ export interface MultimediaRagStackProps extends cdk.StackProps {
    * Lambda@Edge version ARN (optional - required for Auth)
    */
   edgeLambdaVersionArn?: string;
+  
+  /**
+   * Whether to deploy Speech-to-Speech functionality
+   */
+  deploySpeechToSpeech?: boolean;
+  
+  /**
+   * Configuration for Speech-to-Speech stack (optional)
+   */
+  speechToSpeechConfig?: {
+    ecrRepositoryName?: string;
+    memoryLimitMiB?: number;
+    cpuUnits?: number;
+    debugMode?: boolean;
+  };
+  
+  /**
+   * Cross-account S3 bucket ARN for access logs (optional - for higher security)
+   * If provided, logs will be sent to this external bucket instead of the local log bucket
+   */
+  externalLogBucketArn?: string;
 }
 
 /**
@@ -66,6 +88,11 @@ export class MultimediaRagStack extends cdk.Stack {
    */
   public readonly processingStack: ProcessingStack;
   
+  /**
+   * Speech-to-Speech Stack (optional)
+   */
+  public readonly speechToSpeechStack?: SpeechToSpeechStack;
+  
 
   constructor(scope: Construct, id: string, props: MultimediaRagStackProps) {
     super(scope, id, props);
@@ -78,11 +105,31 @@ export class MultimediaRagStack extends cdk.Stack {
     // Add environment tag
     cdk.Tags.of(this).add('Environment', props.resourceConfig.resourceSuffix);
 
-    // Deploy Storage and Distribution stack
+    // First, conditionally deploy Speech-to-Speech stack if requested
+    let nlbDnsName: string | undefined;
+    if (props.deploySpeechToSpeech) {
+      // Deploy the Speech-to-Speech stack with references to Cognito and Knowledge Base
+      this.speechToSpeechStack = new SpeechToSpeechStack(this, 'SpeechToSpeechStack', {
+        resourceSuffix: props.resourceConfig.resourceSuffix,
+        ecrRepositoryName: props.speechToSpeechConfig?.ecrRepositoryName || `speech-to-speech-backend-${props.resourceConfig.resourceSuffix}`,
+        memoryLimitMiB: props.speechToSpeechConfig?.memoryLimitMiB || 2048,
+        cpuUnits: props.speechToSpeechConfig?.cpuUnits || 1024,
+        debugMode: props.speechToSpeechConfig?.debugMode || false,
+      });
+      
+      // Get the NLB DNS name to pass to StorageDistStack
+      nlbDnsName = this.speechToSpeechStack.nlbDnsName;
+    }
+    
+    // Create Storage and Distribution stack with NLB DNS name if available
     this.storageDistStack = new StorageDistStack(this, 'StorageDistStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix,
-      edgeLambdaVersionArn: props.edgeLambdaVersionArn
+      edgeLambdaVersionArn: props.edgeLambdaVersionArn,
+      nlbDnsName: nlbDnsName, // Pass NLB DNS name if available
+      externalLogBucketArn: props.externalLogBucketArn // Pass external log bucket ARN if available
     });
+    
+    // Note: WebSocket URL output is added at the end of the constructor
     
     // Deploy OpenSearch Stack as a NestedStack
     this.openSearchStack = new OpenSearchStack(this, 'OpenSearchStack', {
@@ -90,7 +137,7 @@ export class MultimediaRagStack extends cdk.Stack {
       organizedBucket: this.storageDistStack.organizedBucket
     });
 
-    // Deploy Processing Stack as a NestedStack first to get the retrieval function
+    // Deploy Processing Stack as a NestedStack to get the retrieval function
     this.processingStack = new ProcessingStack(this, 'ProcessingStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix,
       modelId: props.modelId,
@@ -101,12 +148,25 @@ export class MultimediaRagStack extends cdk.Stack {
       opensearchCollection: this.openSearchStack.collection
     });
     
+    // Now that we have the processing stack, we can get the knowledge base ID
+    if (this.speechToSpeechStack && this.processingStack.knowledgeBaseId) {
+      // Unfortunately we can't update the stack properties after creation
+      // This is a limitation of the CDK construct model
+      console.info('Knowledge Base ID is available and should be passed to the SpeechToSpeechStack.');
+    }
+    
     // Deploy Auth Stack as a NestedStack with the retrieval function and media bucket
     this.authStack = new AuthStack(this, 'AuthStack', {
       resourceSuffix: props.resourceConfig.resourceSuffix,
       mediaBucket: this.storageDistStack.mediaBucket,
       retrievalFunction: this.processingStack.retrievalFunction
     });
+    
+    // Now that we have the Auth stack, we can get the Cognito user pool details
+    if (this.speechToSpeechStack) {
+      // Again, we can't update the stack properties after creation
+      console.info('Cognito User Pool details are available and should be passed to the SpeechToSpeechStack.');
+    }
     
     // Output key information for cross-stack references
     new cdk.CfnOutput(this, 'CognitoUserPoolId', {
@@ -170,6 +230,16 @@ export class MultimediaRagStack extends cdk.Stack {
       description: 'CloudFront Distribution Domain Name',
       exportName: `${id}-CloudFrontDomainName`
     });
+    
+    // Add WebSocket URL output if Speech-to-Speech is enabled
+    if (this.speechToSpeechStack) {
+      // Create WebSocket URL using CloudFront domain and WebSocket path
+      new cdk.CfnOutput(this, 'WebSocketURL', {
+        value: `wss://${this.storageDistStack.distribution.distributionDomainName}/ws/speech-to-speech`,
+        description: 'WebSocket URL for Speech-to-Speech service',
+        exportName: `${id}-WebSocketURL`
+      });
+    }
   
     // Add permissions for authenticated users to invoke the retrieval function
     this.authStack.authenticatedRole.addToPolicy(

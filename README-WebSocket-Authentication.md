@@ -1,6 +1,6 @@
 # WebSocket Authentication Implementation
 
-This document outlines the changes made to implement secure WebSocket authentication for the Multi-Media Chatbot with Nova Sonic integration. It covers both the implementation details and the CloudFront integration for secure WebSocket connections.
+This document outlines the secure WebSocket authentication implementation for the Multi-Media Chatbot with Speech-to-Speech integration. It covers both the implementation details and the CloudFront integration for secure WebSocket connections.
 
 ## Table of Contents
 
@@ -11,8 +11,7 @@ This document outlines the changes made to implement secure WebSocket authentica
     - [Frontend Changes](#frontend-changes)
     - [Backend Changes](#backend-changes)
   - [CloudFront Integration](#cloudfront-integration)
-    - [Current Configuration](#current-configuration)
-    - [Required Changes](#required-changes)
+    - [Configuration Details](#configuration-details)
   - [IAM Permission Updates](#iam-permission-updates)
   - [Testing and Verification](#testing-and-verification)
   - [Known Issues](#known-issues)
@@ -26,7 +25,7 @@ The WebSocket authentication implementation secures the speech-to-speech functio
 
 ### Frontend Changes
 
-The frontend implementation in `S2SManager.js` has been updated to include authentication tokens in the WebSocket connection:
+The frontend implementation in the Speech-to-Speech module includes authentication tokens in the WebSocket connection:
 
 ```javascript
 async connectWebSocket() {
@@ -51,17 +50,17 @@ async connectWebSocket() {
 }
 ```
 
-The WebSocket URL in the `.env` file has been updated to use the secure WebSocket protocol (wss://) with CloudFront:
+The WebSocket URL in the `.env` file automatically uses the secure WebSocket protocol (wss://) with CloudFront when deployed:
 
 ```
-REACT_APP_WEBSOCKET_URL=wss://d2opapchhrsmfj.cloudfront.net/ws/nova-sonic-backend
+REACT_APP_WEBSOCKET_URL=wss://<cloudfront-domain>/ws/speech-to-speech
 ```
 
 ### Backend Changes
 
-The backend implementation in `server.py` has been updated to:
+The backend implementation in `speech-backend/server.py` includes:
 
-1. **Extract and validate JWT tokens** from the WebSocket connection URL:
+1. **JWT Token Extraction and Validation**:
 
 ```python
 # Check if there's a query string
@@ -85,7 +84,7 @@ if '?' in path_with_query:
     logger.info(f"[AUTH] [{connection_id}] Authenticated connection from user: {username} ({user_id})")
 ```
 
-2. **Fix path extraction** to work with websockets 15.0.1:
+2. **Robust Path Extraction** compatible with websockets 15.0.1:
 
 ```python
 async def authenticated_handler(websocket, path=None):
@@ -104,75 +103,15 @@ async def authenticated_handler(websocket, path=None):
                 path = "/"
 ```
 
-3. **Add JWT validation** with PyJWT library:
+3. **JWT Validation with PyJWT** for secure token verification:
 
 ```python
 async def validate_token(token, client_ip):
     """Validate the JWT token from Cognito"""
-    start_time = time.time()
-    logger.debug(f"[AUTH] Starting token validation for request from {client_ip}")
-    
-    try:
-        # Get the key ID from the token header
-        header = jwt.get_unverified_header(token)
-        kid = header['kid']
-        logger.debug(f"[AUTH] Token KID: {kid}")
-        
-        # Get the JWKs
-        jwks = await get_jwks()
-        
-        # Find the key matching the kid
-        key = None
-        for jwk in jwks['keys']:
-            if jwk['kid'] == kid:
-                key = jwk
-                break
-                
-        if not key:
-            logger.error(f"[AUTH] Public key not found in JWKS for KID: {kid}")
-            return False, None, None
-            
-        # Convert the JWK to PEM format
-        public_key = RSAAlgorithm.from_jwk(json.dumps(key))
-        
-        # Verify the token
-        payload = jwt.decode(
-            token,
-            public_key,
-            algorithms=['RS256'],
-            options={
-                'verify_signature': True,
-                'verify_exp': True,
-                'verify_nbf': True,
-                'verify_iat': True,
-                'verify_aud': False,  # Skip audience verification if not needed
-                'verify_iss': True,
-                'require': ['exp', 'iat', 'iss']
-            },
-            issuer=f"https://cognito-idp.{AWS_REGION}.amazonaws.com/{USER_POOL_ID}"
-        )
-        
-        # Extract user information
-        user_id = payload.get('sub')
-        username = payload.get('username', payload.get('cognito:username', 'unknown'))
-        
-        validation_time = time.time() - start_time
-        logger.info(f"[AUTH] Token validation successful for user {username} ({user_id}) in {validation_time:.2f}s")
-        
-        return True, user_id, username
-        
-    except jwt.ExpiredSignatureError:
-        logger.error(f"[AUTH] Token has expired for request from {client_ip}")
-        return False, None, None
-    except jwt.InvalidTokenError as e:
-        logger.error(f"[AUTH] Invalid token from {client_ip}: {e}")
-        return False, None, None
-    except Exception as e:
-        logger.error(f"[AUTH] Token validation error from {client_ip}: {e}", exc_info=True)
-        return False, None, None
+    # ... token validation code ...
 ```
 
-4. **Add ping/pong mechanism** for connection health monitoring:
+4. **Connection Health Monitoring** with ping/pong:
 
 ```python
 # Configure WebSocket server with ping interval and timeout
@@ -181,89 +120,137 @@ server_config = {
     "ping_timeout": 30,    # Wait 30 seconds for pong response
     "close_timeout": 10,   # Wait 10 seconds for close handshake
 }
-
-# Start WebSocket server with configuration
-async with websockets.serve(authenticated_handler, host, port, **server_config):
-    logger.info(f"WebSocket server started at host:{host}, port:{port}")
 ```
 
 ## CloudFront Integration
 
-To enable secure WebSocket connections (wss://) when the React app is served from CloudFront, we need to configure CloudFront to proxy WebSocket connections to the NLB.
+To enable secure WebSocket connections (wss://) when the React app is served from CloudFront, the CDK deployment automatically configures CloudFront to proxy WebSocket connections to the Network Load Balancer.
 
-### Current Configuration
+### Configuration Details
 
-The CloudFront distribution has been updated with:
+The CloudFront distribution is configured with:
 
-1. **New Origin**: Added the NLB as an origin
-   ```
-   "Id": "novaso-novas-fjorgdd4bz43-622e4dd0bb63a4c2.elb.us-east-1.amazonaws.com",
-   "DomainName": "novaso-novas-fjorgdd4bz43-622e4dd0bb63a4c2.elb.us-east-1.amazonaws.com",
-   "OriginProtocolPolicy": "http-only"
-   ```
-
-2. **WebSocket Behavior**: Added a behavior for `/ws/*` paths
-   ```
-   "PathPattern": "/ws/*",
-   "TargetOriginId": "novaso-novas-fjorgdd4bz43-622e4dd0bb63a4c2.elb.us-east-1.amazonaws.com",
-   "ViewerProtocolPolicy": "redirect-to-https",
-   "AllowedMethods": {
-       "Quantity": 7,
-       "Items": [
-           "HEAD", "DELETE", "POST", "GET", "OPTIONS", "PUT", "PATCH"
-       ]
-   },
-   "CachePolicyId": "4135ea2d-6df8-44a3-9df3-4b5a84be39ad",
-   "OriginRequestPolicyId": "216adef6-5c7f-47e4-b989-5492eafa07d3"
+1. **NLB Origin** for WebSocket communication:
+   ```typescript
+   const nlbOrigin = new origins.LoadBalancerV2Origin(speechBackendNlb, {
+     protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+     connectionPort: 8081, // WebSocket port
+     connectionTimeout: cdk.Duration.seconds(10),
+     customHeaders: {
+       'X-Origin-Auth': 'speech-to-speech'  // Optional security header
+     }
+   });
    ```
 
-### Required Changes
-
-For the CloudFront distribution to properly support WebSocket connections, the following changes are needed:
-
-1. **Port Configuration**: Update the NLB origin to use port 8081 (the WebSocket server port)
-2. **WebSocket Support**: Enable WebSocket support explicitly
-3. **Cache Policy**: Use a cache policy that disables caching for WebSocket connections
-4. **Origin Request Policy**: Use a policy that forwards all WebSocket headers
-
-These changes need to be integrated into the CDK code in `guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/cdk/lib/storage-dist-stack.ts`.
+2. **WebSocket Behavior** for `/ws/*` paths:
+   ```typescript
+   distribution.addBehavior('/ws/*', nlbOrigin, {
+     viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+     allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+     cachePolicy: new cloudfront.CachePolicy(this, 'WebSocketCachePolicy', {
+       enableAcceptEncodingGzip: true,
+       enableAcceptEncodingBrotli: true,
+       minTtl: cdk.Duration.seconds(0),
+       maxTtl: cdk.Duration.seconds(0),
+       defaultTtl: cdk.Duration.seconds(0),
+       cookieBehavior: cloudfront.CacheCookieBehavior.all(),
+       headerBehavior: cloudfront.CacheHeaderBehavior.allowList(
+         'Sec-WebSocket-Key',
+         'Sec-WebSocket-Version',
+         'Sec-WebSocket-Extensions',
+         'Sec-WebSocket-Protocol'
+       ),
+       queryStringBehavior: cloudfront.CacheQueryStringBehavior.all()
+     }),
+     originRequestPolicy: new cloudfront.OriginRequestPolicy(this, 'WebSocketOriginRequestPolicy', {
+       cookieBehavior: cloudfront.OriginRequestCookieBehavior.all(),
+       headerBehavior: cloudfront.OriginRequestHeaderBehavior.allowList(
+         'Sec-WebSocket-Key',
+         'Sec-WebSocket-Version',
+         'Sec-WebSocket-Extensions',
+         'Sec-WebSocket-Protocol',
+         'Connection',
+         'Upgrade'
+       ),
+       queryStringBehavior: cloudfront.OriginRequestQueryStringBehavior.all()
+     })
+   });
+   ```
 
 ## IAM Permission Updates
 
-The ECS task role in `nova-sonic-stack.ts` needs the following permission added:
+The ECS task role in `speech-to-speech-stack.ts` includes comprehensive permissions for:
 
-```typescript
-// Add Bedrock permission for Retrieve operation
-taskRole.addToPolicy(new iam.PolicyStatement({
-  actions: [
-    'bedrock:Retrieve'  // This permission is missing and needs to be added
-  ],
-  resources: ['*']
-}));
-```
+1. **Bedrock Operations** including bidirectional streaming:
+   ```typescript
+   taskRole.addToPolicy(new iam.PolicyStatement({
+     actions: [
+       'bedrock:InvokeModel',
+       'bedrock:InvokeModelWithResponseStream',
+       'bedrock:InvokeModelWithBidirectionalStream',
+       'bedrock:RetrieveAndGenerate',
+       'bedrock:GetModelCustomizationJob',
+       'bedrock:ListFoundationModels',
+       'bedrock:ListModelCustomizationJobs'
+     ],
+     resources: [
+       `arn:aws:bedrock:${cdk.Stack.of(this).region}:${cdk.Stack.of(this).account}:*`
+     ]
+   }));
+   ```
+
+2. **Bedrock Agent Runtime Operations** for knowledge base access:
+   ```typescript
+   taskRole.addToPolicy(new iam.PolicyStatement({
+     actions: [
+       'bedrock-agent-runtime:Retrieve',
+       'bedrock-agent-runtime:RetrieveAndGenerate'
+     ],
+     resources: ['*'] // Cross-region access
+   }));
+   ```
+
+3. **Cognito Operations** for token validation:
+   ```typescript
+   taskRole.addToPolicy(new iam.PolicyStatement({
+     actions: [
+       'cognito-idp:GetUser',
+       'cognito-idp:DescribeUserPool',
+       'cognito-idp:DescribeUserPoolClient'
+     ],
+     resources: cognitoResources
+   }));
+   ```
 
 ## Testing and Verification
 
 To test the WebSocket authentication:
 
-1. Deploy the updated code to AWS
-2. Open the React app from CloudFront
+1. Deploy the solution using the unified deployment script:
+   ```bash
+   ./deploy.sh -e dev -r us-east-1
+   ```
+   Note: Speech-to-Speech capabilities require deployment in us-east-1 region.
+
+2. Open the React app from the CloudFront URL provided in the deployment output
 3. Sign in with valid credentials
-4. Start a conversation to test the WebSocket connection
-5. Verify in the logs that authentication is working correctly
+4. Click on the microphone icon to start a speech-to-speech conversation
+5. Verify in the CloudWatch logs that authentication is working correctly
 
 ## Known Issues
 
 1. **Token Expiration**: JWT tokens from Cognito have an expiration time, but WebSocket connections can stay open longer. A token refresh mechanism is needed for long-lived connections.
 
-2. **CloudFront Configuration**: The CloudFront distribution needs to be properly configured for WebSocket support. If not configured correctly, WebSocket connections will fail with error code 1006.
+2. **Region Limitations**: The Speech-to-Speech functionality using Amazon Nova Sonic is currently only available in the us-east-1 region.
+
+3. **CloudFront Configuration**: WebSocket connections require specific CloudFront configuration. If not configured correctly, connections will fail with error code 1006.
 
 ## Future Improvements
 
 1. **Token Refresh Mechanism**: Implement a mechanism to refresh tokens for long-lived WebSocket connections.
 
-2. **Unified CDK Deployment**: Integrate the Nova Sonic stack into the guidance CDK project for a more cohesive deployment process.
+2. **HTTPS/WSS Support for Local Development**: Add support for secure WebSocket connections during local development.
 
 3. **Enhanced Error Handling**: Add more comprehensive error handling and recovery mechanisms for WebSocket connections.
 
-4. **Monitoring Solution**: Implement a more robust monitoring solution for WebSocket connections.
+4. **Monitoring Dashboard**: Implement a more comprehensive CloudWatch dashboard for monitoring WebSocket connections and speech-to-speech metrics.

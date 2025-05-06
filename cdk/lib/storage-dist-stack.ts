@@ -20,6 +20,17 @@ export interface StorageDistStackProps extends cdk.NestedStackProps {
    * Edge lambda function ARN (Optional - required for Auth)
    */
   edgeLambdaVersionArn?: string;
+  
+  /**
+   * Network Load Balancer DNS name (Optional - required for WebSocket support)
+   */
+  nlbDnsName?: string;
+
+  /**
+   * Cross-account S3 bucket ARN for access logs (Optional - for higher security)
+   * If provided, logs will be sent to this external bucket instead of the local log bucket
+   */
+  externalLogBucketArn?: string;
 }
 
 /**
@@ -54,6 +65,11 @@ export class StorageDistStack extends cdk.NestedStack {
    * S3 bucket for hosting the React application
    */
   public readonly applicationHostBucket: s3.Bucket;
+  
+  /**
+   * S3 bucket for access logs
+   */
+  public readonly accessLogBucket: s3.Bucket;
 
   /**
    * CloudFront distribution
@@ -82,12 +98,50 @@ export class StorageDistStack extends cdk.NestedStack {
     cdk.Tags.of(this).add('Environment', props.resourceSuffix);
     
     // ======== STORAGE PART ========
+    
+    // Create a dedicated bucket for access logs with appropriate security settings
+    this.accessLogBucket = new s3.Bucket(this, 'AccessLogsBucket', {
+      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      encryption: s3.BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      versioned: true, // Preserve log history
+      objectOwnership: s3.ObjectOwnership.BUCKET_OWNER_PREFERRED, // Ensure bucket owner has full control of logs
+      lifecycleRules: [
+        {
+          enabled: true,
+          transitions: [
+            {
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: cdk.Duration.days(30)
+            },
+            {
+              storageClass: s3.StorageClass.GLACIER,
+              transitionAfter: cdk.Duration.days(90)
+            }
+          ],
+          expiration: cdk.Duration.days(365) // Retain logs for 1 year
+        }
+      ]
+    });
+    
+    // Determine which bucket to use for access logging
+    let logBucket: s3.IBucket;
+    if (props.externalLogBucketArn) {
+      // Use external log bucket if ARN is provided (higher security)
+      logBucket = s3.Bucket.fromBucketArn(this, 'ExternalLogBucket', props.externalLogBucketArn);
+    } else {
+      // Use the local log bucket
+      logBucket = this.accessLogBucket;
+    }
+    
     // Create the Media bucket for source files 
     this.mediaBucket = new s3.Bucket(this, 'MediaBucket', {
       eventBridgeEnabled: true, // Enable EventBridge notifications
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED, // Enable SSE for security
       enforceSSL: true, // Enforce SSL for security
+      serverAccessLogsBucket: logBucket, // Enable access logging
+      serverAccessLogsPrefix: 'media-bucket-logs/', // Using prefix to organize logs
       cors: [
         {
           allowedHeaders: ['*'],
@@ -109,6 +163,8 @@ export class StorageDistStack extends cdk.NestedStack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
+      serverAccessLogsBucket: logBucket, // Enable access logging
+      serverAccessLogsPrefix: 'organized-bucket-logs/', // Using prefix to organize logs
       lifecycleRules: [  // Cost optimization: transition objects to cheaper storage
         {
           enabled: true,
@@ -127,7 +183,9 @@ export class StorageDistStack extends cdk.NestedStack {
       eventBridgeEnabled: true,
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
-      enforceSSL: true
+      enforceSSL: true,
+      serverAccessLogsBucket: logBucket, // Enable access logging
+      serverAccessLogsPrefix: 'multimodal-bucket-logs/' // Using prefix to organize logs
     });
 
     // Create the Application Host bucket for the React frontend
@@ -135,6 +193,8 @@ export class StorageDistStack extends cdk.NestedStack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
+      serverAccessLogsBucket: logBucket, // Enable access logging
+      serverAccessLogsPrefix: 'app-host-bucket-logs/', // Using prefix to organize logs
       removalPolicy: cdk.RemovalPolicy.DESTROY, // For easier cleanup during development
       autoDeleteObjects: true // For easier cleanup during development
     });
@@ -164,6 +224,18 @@ export class StorageDistStack extends cdk.NestedStack {
     const mediaBucketS3Origin = new origins.S3Origin(this.mediaBucket);
     const appBucketS3Origin = new origins.S3Origin(this.applicationHostBucket);
     
+    // Create NLB origin if DNS name is provided
+    let nlbOrigin: origins.HttpOrigin | undefined;
+    
+    if (props.nlbDnsName) {
+      nlbOrigin = new origins.HttpOrigin(props.nlbDnsName, {
+        protocolPolicy: cloudfront.OriginProtocolPolicy.HTTP_ONLY,
+        httpPort: 8081,
+        readTimeout: cdk.Duration.seconds(60),
+        keepaliveTimeout: cdk.Duration.seconds(60)
+      });
+    }
+    
     // Define default cache behavior with or without Lambda@Edge
     const defaultBehavior: cloudfront.BehaviorOptions = {
       origin: mediaBucketS3Origin,
@@ -187,43 +259,67 @@ export class StorageDistStack extends cdk.NestedStack {
       } : {})
     };
     
+    // Create additionalBehaviors object with conditional WebSocket behavior
+    const additionalBehaviors: Record<string, cloudfront.BehaviorOptions> = {
+      '*.html': {
+        origin: appBucketS3Origin,
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.CORS_S3_ORIGIN,
+        responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS,
+        compress: true
+      },
+      '*.js': {
+        origin: appBucketS3Origin,
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.CORS_S3_ORIGIN,
+        responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS,
+        compress: true
+      },
+      '*.css': {
+        origin: appBucketS3Origin,
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.CORS_S3_ORIGIN,
+        responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS,
+        compress: true
+      }
+    };
+    
+    // Add WebSocket behavior if NLB origin is available
+    if (nlbOrigin) {
+      additionalBehaviors['/ws/*'] = {
+        origin: nlbOrigin,
+        viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+        allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+        cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+        originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER,
+        compress: true
+      };
+    }
+    
     // Create CloudFront Distribution
     this.distribution = new cloudfront.Distribution(this, 'CloudFrontDistribution', {
       defaultRootObject: 'index.html',
       comment: `Distribution for ${cdk.Aws.ACCOUNT_ID} media and application buckets`,
       defaultBehavior,
-      additionalBehaviors: {
-        '*.html': {
-          origin: appBucketS3Origin,
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          originRequestPolicy: cloudfront.OriginRequestPolicy.CORS_S3_ORIGIN,
-          responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS,
-          compress: true
-        },
-        '*.js': {
-          origin: appBucketS3Origin,
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          originRequestPolicy: cloudfront.OriginRequestPolicy.CORS_S3_ORIGIN,
-          responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS,
-          compress: true
-        },
-        '*.css': {
-          origin: appBucketS3Origin,
-          viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
-          allowedMethods: cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
-          cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
-          originRequestPolicy: cloudfront.OriginRequestPolicy.CORS_S3_ORIGIN,
-          responseHeadersPolicy: cloudfront.ResponseHeadersPolicy.CORS_ALLOW_ALL_ORIGINS_WITH_PREFLIGHT_AND_SECURITY_HEADERS,
-          compress: true
-        }
-      },
+      additionalBehaviors,
       priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
       httpVersion: cloudfront.HttpVersion.HTTP2,
-      enableIpv6: true
+      enableIpv6: true,
+      
+      // Security configurations
+      minimumProtocolVersion: cloudfront.SecurityPolicyProtocol.TLS_V1_2_2021, // Enforce TLSv1.2 with modern ciphers
+      
+      // Enable CloudFront logging for security audits and investigations
+      enableLogging: true,
+      logBucket: this.accessLogBucket,
+      logFilePrefix: 'cloudfront-logs/',
+      logIncludesCookies: true // Include cookies for comprehensive investigation capability
     });
     
     // Apply Origin Access Control to S3 origins by modifying the CloudFront Distribution's CfnResource
@@ -294,5 +390,11 @@ export class StorageDistStack extends cdk.NestedStack {
       exportName: `${id}-CloudFrontDistributionArn`
     });
     
+    // Access log bucket output
+    new cdk.CfnOutput(this, 'AccessLogsBucketName', {
+      value: this.accessLogBucket.bucketName,
+      description: 'S3 Access Logs Bucket Name',
+      exportName: `${id}-AccessLogsBucketName`
+    });
   }
 }

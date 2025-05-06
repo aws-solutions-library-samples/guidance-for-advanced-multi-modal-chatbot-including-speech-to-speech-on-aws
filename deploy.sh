@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e  # Exit on error
 
-# Combined deployment script for Multimedia RAG Chat Assistant and NovaSonic
+# Unified deployment script for Multimedia RAG Chat Assistant with Speech-to-Speech capabilities
 
 # Configuration with defaults
 ENV="dev"
@@ -11,14 +11,11 @@ EDGE_LAMBDA="false"
 SKIP_FRONTEND="false"
 SKIP_INFRASTRUCTURE="false"
 LOCAL_CONFIG_ONLY="false"
-DEPLOY_NOVASONIC="false"
-SKIP_NOVASONIC="false"
-ECR_REPO_NAME="nova-sonic-backend"
-CLUSTER_NAME="nova-sonic-backend"
-NOVASONIC_STACK_NAME="NovaSonicBackendStack"
+S2S_ENABLED="true"
+ECR_REPO_NAME="speech-to-speech-backend"
 
 # Parse command line options
-while getopts ":e:r:p:lfsinNh" opt; do
+while getopts ":e:r:p:lfsiSh" opt; do
   case $opt in
     e) ENV="$OPTARG" ;;
     r) REGION="$OPTARG" ;;
@@ -27,21 +24,19 @@ while getopts ":e:r:p:lfsinNh" opt; do
     f) SKIP_FRONTEND="true" ;;
     s) SKIP_INFRASTRUCTURE="true" ;;
     i) LOCAL_CONFIG_ONLY="true" ;;
-    n) DEPLOY_NOVASONIC="true" ;;
-    N) SKIP_NOVASONIC="true" ;;
+    S) S2S_ENABLED="false" ;;
     h)
-      echo "Usage: ./deploy-combined.sh [options]"
+      echo "Usage: ./deploy.sh [options]"
       echo ""
       echo "Options:"
       echo "  -e ENV     Environment name (default: dev)"
-      echo "  -r REGION  AWS region (default: from AWS CLI config, must be us-east-1 if using NovaSonic)"
+      echo "  -r REGION  AWS region (default: from AWS CLI config)"
       echo "  -p PROFILE AWS profile name to use (default: default)"
       echo "  -l         Deploy Lambda@Edge functions (always in us-east-1)"
       echo "  -f         Skip frontend deployment (infrastructure only)"
       echo "  -s         Skip infrastructure (frontend only)"
       echo "  -i         Generate local configuration only (no deployment)"
-      echo "  -n         Deploy NovaSonic backend (requires us-east-1 region)"
-      echo "  -N         Skip NovaSonic backend deployment"
+      echo "  -S         Disable Speech-to-Speech capabilities (enabled by default)"
       echo "  -h         Show this help"
       exit 0
       ;;
@@ -56,48 +51,42 @@ while getopts ":e:r:p:lfsinNh" opt; do
   esac
 done
 
-# Check region compatibility with NovaSonic
-if [ "$DEPLOY_NOVASONIC" = "true" ] && [ "$REGION" != "us-east-1" ]; then
-  echo "❌ Error: NovaSonic deployment requires us-east-1 region"
+# Check region compatibility with Speech-to-Speech
+if [ "$S2S_ENABLED" = "true" ] && [ "$REGION" != "us-east-1" ]; then
+  echo "⚠️ Warning: Speech-to-Speech deployment requires us-east-1 region"
   echo "   Current region: $REGION"
-  echo "   Please use -r us-east-1 when deploying NovaSonic"
-  exit 1
-fi
-
-# If both DEPLOY_NOVASONIC and SKIP_NOVASONIC are true, prioritize SKIP_NOVASONIC
-if [ "$DEPLOY_NOVASONIC" = "true" ] && [ "$SKIP_NOVASONIC" = "true" ]; then
-  echo "⚠️ Warning: Both -n and -N options provided. Prioritizing -N (Skip NovaSonic)"
-  DEPLOY_NOVASONIC="false"
+  echo "   Speech-to-Speech capabilities will be disabled. Re-run with -r us-east-1 to enable Speech-to-Speech."
+  S2S_ENABLED="false"
 fi
 
 # Print banner
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║                                                                ║"
-echo "║       🚀 Combined Multimedia RAG & NovaSonic Deployment        ║"
+echo "║       🚀 Multimedia RAG Chat Assistant Deployment              ║"
 echo "║                                                                ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo "Environment: $ENV"
 echo "Region: $REGION"
 echo "AWS Profile: $PROFILE"
 echo "Deploy Edge Lambda: $EDGE_LAMBDA"
-echo "Deploy NovaSonic: $DEPLOY_NOVASONIC"
+echo "Deploy Speech-to-Speech: $S2S_ENABLED"
 echo ""
 
 # Ensure commander package is installed for the config generator
 if [ "$SKIP_INFRASTRUCTURE" = "false" ] || [ "$LOCAL_CONFIG_ONLY" = "true" ]; then
   echo "📦 Checking dependencies..."
-  cd guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/cdk
+  cd cdk
   npm list commander || npm install commander --no-save
-  cd ../..
+  cd ..
 fi
 
 # Step 1: Build React App first (if not skipped)
 if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
   echo "🖥️  Building React frontend..."
-  cd guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react
+  cd chatbot-react
   npm install
   npm run build
-  cd ../..
+  cd ..
 fi
 
 # Step 2: Deploy Infrastructure Stack (if not skipped)
@@ -120,10 +109,16 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
     DEPLOY_CONTEXT="$DEPLOY_CONTEXT --context deployEdgeLambda=true"
   fi
   
+  # Add speech-to-speech context flag if needed
+  if [ "$S2S_ENABLED" = "true" ]; then
+    echo "Deploying with Speech-to-Speech support..."
+    DEPLOY_CONTEXT="$DEPLOY_CONTEXT --context deploySpeechToSpeech=true"
+  fi
+  
   # Step 2.1: Deploy Lambda@Edge stack first if requested (must be in us-east-1)
   if [ "$EDGE_LAMBDA" = "true" ]; then
     echo "📦 Deploying Lambda@Edge stack in us-east-1..."
-    cd guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/cdk
+    cd cdk
     npm ci
     npm run build
     
@@ -140,39 +135,23 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
       --profile $PROFILE)
     
     echo "Lambda@Edge ARN: $EDGE_LAMBDA_ARN"
-    cd ../..
+    cd ..
   fi
   
-  # Step 2.2: Deploy MultimediaRagStack
-  echo "📦 Deploying MultimediaRagStack..."
-  cd guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/cdk
-  
-  # Ensure dependencies are installed
-  if [ "$EDGE_LAMBDA" != "true" ]; then
-    # Only run these if not already done for Lambda@Edge
-    npm ci
-    npm run build
-  fi
-  
-  # Deploy the MultimediaRagStack with the appropriate context
-  echo "Deploying MultimediaRagStack-$ENV..."
-  npx cdk deploy "MultimediaRagStack-$ENV" $DEPLOY_CONTEXT --profile $PROFILE --region $REGION --require-approval=never
-  cd ../..
-  
-  # Step 2.3: Deploy NovaSonic if requested
-  if [ "$DEPLOY_NOVASONIC" = "true" ] && [ "$SKIP_NOVASONIC" = "false" ]; then
-    echo "📦 Deploying NovaSonic backend..."
+  # Step 2.2: Prepare for Speech-to-Speech if requested (must be in us-east-1)
+  if [ "$S2S_ENABLED" = "true" ]; then
+    echo "📦 Preparing Speech-to-Speech backend..."
     
-    # Step 2.3.1: Get or create ECR repository
+    # Step 2.2.1: Get or create ECR repository
     echo "=== Getting or creating ECR repository ==="
-    ECR_REPO_URI=$(aws ecr describe-repositories --repository-names $ECR_REPO_NAME --profile $PROFILE --region us-east-1 --query 'repositories[0].repositoryUri' --output text 2>/dev/null || echo "")
+    ECR_REPO_URI=$(aws ecr describe-repositories --repository-names "$ECR_REPO_NAME-$ENV" --profile $PROFILE --region us-east-1 --query 'repositories[0].repositoryUri' --output text 2>/dev/null || echo "")
 
     if [ -z "$ECR_REPO_URI" ] || [ "$ECR_REPO_URI" == "None" ]; then
       echo "ECR repository not found in region us-east-1. Creating it now..."
-      aws ecr create-repository --repository-name $ECR_REPO_NAME --profile $PROFILE --region us-east-1
+      aws ecr create-repository --repository-name "$ECR_REPO_NAME-$ENV" --profile $PROFILE --region us-east-1
       
       # Get the URI of the newly created repository
-      ECR_REPO_URI=$(aws ecr describe-repositories --repository-names $ECR_REPO_NAME --profile $PROFILE --region us-east-1 --query 'repositories[0].repositoryUri' --output text)
+      ECR_REPO_URI=$(aws ecr describe-repositories --repository-names "$ECR_REPO_NAME-$ENV" --profile $PROFILE --region us-east-1 --query 'repositories[0].repositoryUri' --output text)
       
       if [ -z "$ECR_REPO_URI" ] || [ "$ECR_REPO_URI" == "None" ]; then
         echo "Failed to create ECR repository. Please check your AWS credentials and permissions."
@@ -182,9 +161,9 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
       fi
     fi
     
-    # Step 2.3.2: Build and push Docker image
+    # Step 2.2.2: Build and push Docker image
     echo "=== Building and pushing Docker image ==="
-    cd novasonic/python-backend
+    cd speech-backend
 
     echo "Using ECR repository: $ECR_REPO_URI"
 
@@ -198,7 +177,8 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
 
     # Build Docker image
     echo "Building Docker image..."
-    docker build -t $ECR_REPO_NAME:latest .
+    # Build for AMD64 platform specifically
+    docker buildx build --platform linux/amd64 -t "$ECR_REPO_NAME-$ENV:latest" --load .
     if [ $? -ne 0 ]; then
       echo "Docker build failed. Please check the Dockerfile and your Docker installation."
       exit 1
@@ -206,81 +186,42 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
 
     # Tag and push Docker image
     echo "Tagging and pushing Docker image to ECR..."
-    docker tag $ECR_REPO_NAME:latest $ECR_REPO_URI:latest
-    docker push $ECR_REPO_URI:latest
+    docker tag "$ECR_REPO_NAME-$ENV:latest" "$ECR_REPO_URI:latest"
+    docker push "$ECR_REPO_URI:latest"
     if [ $? -ne 0 ]; then
       echo "Failed to push Docker image to ECR. Please check your network connection and AWS permissions."
       exit 1
     fi
 
     echo "Successfully pushed Docker image to ECR: $ECR_REPO_URI:latest"
-    cd ../..
+    cd ..
     
-    # Step 2.3.3: Export environment variables from chatbot-react/.env for the NovaSonic backend
-    echo "=== Exporting environment variables from chatbot-react/.env ==="
-    if [ -f "../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env" ]; then
-      echo "Found .env file, exporting variables..."
-      # Export REACT_APP_* variables
-      export $(grep -v '^#' ../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep REACT_APP_ | xargs)
-      # Export USE_RAG and RAG_MODEL_ARN variables
-      export $(grep -v '^#' ../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep USE_RAG | xargs)
-      export $(grep -v '^#' ../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env | grep RAG_MODEL_ARN | xargs)
-      
-      # Print the exported variables for debugging
-      echo "Exported environment variables:"
-      echo "REACT_APP_DOCUMENTS_KB_ID: $REACT_APP_DOCUMENTS_KB_ID"
-      echo "REACT_APP_AWS_REGION: $REACT_APP_AWS_REGION"
-      echo "USE_RAG: $USE_RAG"
-      echo "RAG_MODEL_ARN: $RAG_MODEL_ARN"
-    else
-      echo "Warning: .env file not found in ../../guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/"
-    fi
-    
-    # Step 2.3.4: Build and deploy NovaSonic CDK stack
-    echo "=== Building and deploying NovaSonic stack ==="
-    cd novasonic/infrastructure
-    # Set CDK_DEFAULT_REGION to ensure CDK uses the correct region
-    export CDK_DEFAULT_REGION=us-east-1
-    echo "Setting CDK_DEFAULT_REGION to us-east-1"
-    
-    # Remove any existing context file that might override region settings
-    rm -f cdk.context.json
-    npm install
-    npm run build
-    # Deploy the NovaSonic stack
-    npx cdk deploy $NOVASONIC_STACK_NAME --profile $PROFILE --region us-east-1 --require-approval=never
-    cd ../..
-
-    # Force a new deployment of the ECS service to use the latest image
-    echo "=== Getting ECS service name ==="
-    SERVICE_NAME=$(aws ecs list-services --cluster $CLUSTER_NAME --profile $PROFILE --region us-east-1 --query 'serviceArns[0]' --output text | awk -F'/' '{print $NF}')
-
-    if [ -z "$SERVICE_NAME" ] || [ "$SERVICE_NAME" == "None" ]; then
-      echo "No ECS service found in cluster $CLUSTER_NAME"
-    else
-      echo "Found ECS service: $SERVICE_NAME"
-      echo "=== Forcing new deployment of ECS service ==="
-      # Use --no-cli-pager to prevent the full service description from being printed
-      aws ecs update-service --cluster $CLUSTER_NAME --service $SERVICE_NAME --force-new-deployment --profile $PROFILE --region us-east-1 --no-cli-pager --output json > /dev/null
-      echo "Service update initiated successfully"
-      
-      # Print just the essential service information
-      echo "=== Current service status ==="
-      aws ecs describe-services --cluster $CLUSTER_NAME --services $SERVICE_NAME --profile $PROFILE --region us-east-1 --query 'services[0].{Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount,DeploymentStatus:deployments[0].status}' --output table
-    fi
+    # Add ECR repository name to context for Speech-to-Speech stack
+    DEPLOY_CONTEXT="$DEPLOY_CONTEXT --context ecrRepositoryName=$ECR_REPO_NAME-$ENV"
   fi
+  
+  # Step 2.3: Deploy MultimediaRagStack
+  echo "📦 Deploying MultimediaRagStack..."
+  cd cdk
+  
+  # Ensure dependencies are installed
+  if [ "$EDGE_LAMBDA" != "true" ]; then
+    # Only run these if not already done for Lambda@Edge
+    npm ci
+    npm run build
+  fi
+  
+  # Deploy the MultimediaRagStack with the appropriate context
+  echo "Deploying MultimediaRagStack-$ENV..."
+  npx cdk deploy "MultimediaRagStack-$ENV" $DEPLOY_CONTEXT --profile $PROFILE --region $REGION --require-approval=never
+  cd ..
 fi
 
 # Step 3: Generate local and production configurations
 if [ "$LOCAL_CONFIG_ONLY" = "true" ] || [ "$SKIP_INFRASTRUCTURE" = "false" ]; then
   echo "⚙️  Generating configurations..."
   
-  # Step 3.1: Generate base configuration using existing script
-  cd guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/cdk
-  node ./scripts/generate-local-config.js --env $ENV --region $REGION --profile $PROFILE
-  cd ../..
-  
-  # Step 3.2: Get outputs from MultimediaRagStack
+  # Step 3.1: Get outputs from MultimediaRagStack
   echo "🔍 Getting outputs from MultimediaRagStack..."
   
   # Get Lambda function name
@@ -347,23 +288,43 @@ if [ "$LOCAL_CONFIG_ONLY" = "true" ] || [ "$SKIP_INFRASTRUCTURE" = "false" ]; th
     --region $REGION \
     --profile $PROFILE)
   
-  # Step 3.3: Get WebSocket URL from NovaSonic if deployed
+  # Step 3.2: Get WebSocket URL from MultimediaRagStack if Speech-to-Speech is deployed
   WEBSOCKET_URL=""
-  if [ "$DEPLOY_NOVASONIC" = "true" ] && [ "$SKIP_NOVASONIC" = "false" ]; then
-    echo "🔍 Getting WebSocket URL from NovaSonic stack..."
+  if [ "$S2S_ENABLED" = "true" ]; then
+    echo "🔍 Getting WebSocket URL from MultimediaRagStack..."
     WEBSOCKET_URL=$(aws cloudformation describe-stacks \
-      --stack-name $NOVASONIC_STACK_NAME \
+      --stack-name "MultimediaRagStack-$ENV" \
       --query "Stacks[0].Outputs[?OutputKey=='WebSocketURL'].OutputValue" \
       --output text \
-      --region us-east-1 \
+      --region $REGION \
       --profile $PROFILE)
     
-    echo "WebSocket URL: $WEBSOCKET_URL"
+    # If not found, look in us-east-1 region (nested stack might have outputs in parent region)
+    if [ -z "$WEBSOCKET_URL" ] || [ "$WEBSOCKET_URL" == "None" ]; then
+      echo "WebSocket URL not found in $REGION, checking us-east-1..."
+      WEBSOCKET_URL=$(aws cloudformation describe-stacks \
+        --stack-name "MultimediaRagStack-$ENV" \
+        --query "Stacks[0].Outputs[?OutputKey=='WebSocketURL'].OutputValue" \
+        --output text \
+        --region us-east-1 \
+        --profile $PROFILE)
+    fi
+    
+    if [ -z "$WEBSOCKET_URL" ] || [ "$WEBSOCKET_URL" == "None" ]; then
+      echo "⚠️ WebSocket URL not found in CloudFormation outputs"
+      # Generate WebSocket URL from CloudFront domain
+      if [ ! -z "$CLOUDFRONT_DOMAIN" ]; then
+        WEBSOCKET_URL="wss://$CLOUDFRONT_DOMAIN/ws/speech-to-speech"
+        echo "Generated WebSocket URL based on CloudFront domain: $WEBSOCKET_URL"
+      fi
+    else
+      echo "WebSocket URL: $WEBSOCKET_URL"
+    fi
   fi
   
-  # Step 3.4: Generate complete .env file
+  # Step 3.3: Generate complete .env file
   echo "📝 Generating .env file with all outputs..."
-  cat > guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/.env << EOL
+  cat > chatbot-react/.env << EOL
 REACT_APP_LAMBDA_FUNCTION_NAME=$LAMBDA_FUNCTION_NAME
 REACT_APP_S3_SOURCE=$MEDIA_BUCKET
 REACT_APP_AWS_REGION=$REGION
@@ -375,9 +336,9 @@ REACT_APP_DOCUMENTS_KB_ID=$KNOWLEDGE_BASE_ID
 REACT_APP_DOCUMENTS_DS_ID=$DATA_SOURCE_ID
 REACT_APP_WEBSOCKET_URL=$WEBSOCKET_URL
 
-# Amazon Nova Sonic Knowledge Base Integration Settings
-USE_RAG=false
-RAG_MODEL_ARN=us.amazon.nova-micro-v1:0
+# Speech-to-Speech Knowledge Base Integration Settings
+USE_RAG=true
+RAG_MODEL_ARN=anthropic.claude-3-haiku-20240307-v1:0
 EOL
 
   echo "✅ Configuration generated successfully"
@@ -405,7 +366,7 @@ if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
   
   # Perform the S3 sync
   echo "🔄 Syncing React build to S3..."
-  aws s3 sync guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react/build/ s3://$APP_BUCKET/ \
+  aws s3 sync chatbot-react/build/ s3://$APP_BUCKET/ \
     --profile $PROFILE \
     --delete \
     --cache-control "max-age=3600"
@@ -433,10 +394,17 @@ fi
 echo "✅ Deployment complete!"
 echo ""
 echo "To run the React app locally:"
-echo "  cd guidance-for-multi-media-chatbot-on-aws-feature-cdk-migration/chatbot-react"
+echo "  cd chatbot-react"
 echo "  npm start"
 echo ""
 echo "Your app will use cloud resources from the '$ENV' environment."
-if [ "$DEPLOY_NOVASONIC" = "true" ] && [ "$SKIP_NOVASONIC" = "false" ]; then
-  echo "NovaSonic backend is deployed and integrated with the frontend."
+if [ "$S2S_ENABLED" = "true" ]; then
+  echo "Speech-to-Speech capabilities are enabled and integrated with the frontend."
+else
+  echo "Speech-to-Speech capabilities are disabled."
+  if [ "$REGION" != "us-east-1" ]; then
+    echo "To enable Speech-to-Speech, re-run with -r us-east-1 (as Speech-to-Speech is only available in us-east-1 region)."
+  else
+    echo "To enable Speech-to-Speech, re-run without the -S flag."
+  fi
 fi
