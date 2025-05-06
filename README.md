@@ -279,6 +279,30 @@ If your local development environment is missing configuration:
 1. Run `./deploy.sh -e dev -i` to regenerate the configuration files without deployment
 2. Verify that `.env.local` has been created in the chatbot-react directory
 
+## Cost
+
+You are responsible for the cost of the AWS services used while running this Guidance. As of May 2025, the cost for running this Guidance with the default settings in the US East (N. Virginia) Region is approximately $213.18 per month for processing (~1,000 conversations with 5,000 multimedia files).
+
+This estimate is based on a deployment supporting 100 active users executing approximately 1,000 multimedia RAG conversations per month. Each conversation processes an average of 5 multimedia files (PDFs, images, videos, etc.) through the RAG pipeline.
+
+| AWS Service | Dimensions | Cost - USD |
+|-------------|------------|------------|
+| Amazon S3 | • 100GB total storage<br>• 5,000 PUT requests<br>• 50,000 GET requests | $4.75 |
+| Amazon OpenSearch Serverless | • On-demand capacity (8hrs/day)<br>• 50GB storage | $152.40 |
+| AWS Lambda | • 5,000 retrieval invocations<br>• 5,000 processing invocations | $1.22 |
+| Amazon ECS Fargate | • 1 task (1vCPU, 2GB)<br>• 8hrs/day operation | $9.72 |
+| Network Load Balancer | • 1 NLB<br>• 50GB processed | $17.10 |
+| Amazon VPC (NAT Gateway) | • 1 NAT Gateway (8hrs/day)<br>• 20GB data | $11.70 |
+| Amazon CloudFront | • 100GB data transfer<br>• 1M requests | $9.50 |
+| Amazon EventBridge | • 5,000 custom events | $0.01 |
+| Amazon CloudWatch | • 5GB logs, 10 metrics, 1 dashboard | $6.50 |
+| Amazon Cognito | • 100 monthly active users | $0.28 |
+| **TOTAL** | | **$213.18** |
+
+**Note**: The above estimate only covers AWS infrastructure costs. Additional Amazon Bedrock model inference charges and Amazon Nova Sonic charges will apply based on your usage and are not included in this estimate. These charges depend on the specific models used, the number of tokens processed, and the duration of speech-to-speech interactions. Please refer to the [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/) page for current model inference costs.
+
+We recommend creating a Budget through AWS Cost Explorer to help manage costs. Prices are subject to change. For full details, refer to the pricing webpage for each AWS service used in this Guidance.
+
 ## Limitations
 
 - **File Size Limits:** 
