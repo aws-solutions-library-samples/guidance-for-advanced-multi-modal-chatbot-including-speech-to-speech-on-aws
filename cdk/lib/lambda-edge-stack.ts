@@ -97,7 +97,7 @@ export class LambdaEdgeStack extends cdk.Stack {
       handler: 'index.lambda_handler',
       role: edgeFunctionRole,
       memorySize: 128,
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(5),
       code: lambda.Code.fromInline(`
 import json
 import base64
