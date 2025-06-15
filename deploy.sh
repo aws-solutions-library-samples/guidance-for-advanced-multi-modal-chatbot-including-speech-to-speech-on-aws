@@ -80,14 +80,7 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] || [ "$LOCAL_CONFIG_ONLY" = "true" ]; th
   cd ..
 fi
 
-# Step 1: Build React App first (if not skipped)
-if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
-  echo "🖥️  Building React frontend..."
-  cd chatbot-react
-  npm install
-  npm run build
-  cd ..
-fi
+# Note: React frontend build moved after environment variables are generated
 
 # Step 2: Deploy Infrastructure Stack (if not skipped)
 if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
@@ -344,7 +337,16 @@ EOL
   echo "✅ Configuration generated successfully"
 fi
 
-# Step 4: Deploy frontend to S3 if not skipped
+# Step 4: Build React App with environment variables
+if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
+  echo "🖥️  Building React frontend with environment variables..."
+  cd chatbot-react
+  npm install
+  npm run build
+  cd ..
+fi
+
+# Step 5: Deploy frontend to S3 if not skipped
 if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
   echo "📤 Deploying frontend to S3..."
   
