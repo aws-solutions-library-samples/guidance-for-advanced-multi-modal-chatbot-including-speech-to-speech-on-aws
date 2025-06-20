@@ -26,9 +26,10 @@ let edgeStack: LambdaEdgeStack | undefined;
 
 // 1. Deploy Lambda@Edge stack first if requested (must be in us-east-1)
 if (app.node.tryGetContext('deployEdgeLambda') === 'true') {
+  const targetRegion = app.node.tryGetContext('targetRegion') || region;
   edgeStack = new LambdaEdgeStack(app, `LambdaEdgeStack-${resourceSuffix}`, {
     resourceSuffix: resourceSuffix,
-    // We'll update Cognito params later when we have them
+    cognitoRegion: targetRegion, // Pass the target region where MultimediaRagStack will be deployed
     env: {
       account: account,
       region: 'us-east-1'  // Lambda@Edge must be in us-east-1

@@ -86,9 +86,15 @@ export class LambdaEdgeStack extends cdk.Stack {
       })
     );
     
-    // Use region and UserPoolId with defaults
-    const cognitoRegion = props.cognitoRegion || this.region;
-    const userPoolId = props.cognitoUserPoolId || 'POOL_ID_PLACEHOLDER';
+    // Add permissions to read SSM parameters for Cognito configuration
+    edgeFunctionRole.addToPolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [
+          `arn:aws:ssm:*:${cdk.Aws.ACCOUNT_ID}:parameter/multimedia-rag/${props.resourceSuffix}/*`
+        ]
+      })
+    );
     
     // Create Lambda@Edge function
     this.edgeFunction = new lambda.Function(this, 'EdgeFunction', {
@@ -97,20 +103,51 @@ export class LambdaEdgeStack extends cdk.Stack {
       handler: 'index.lambda_handler',
       role: edgeFunctionRole,
       memorySize: 128,
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(5),
       code: lambda.Code.fromInline(`
 import json
 import base64
 import time
 import urllib.request
 import urllib.parse
-import os
+import boto3
 from json import loads
 
-# Allow overriding via environment variables
-COGNITO_REGION = os.environ.get('COGNITO_REGION', '${cognitoRegion}')
-USER_POOL_ID = os.environ.get('USER_POOL_ID', '${userPoolId}')
-JWKS_URL = f'https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{USER_POOL_ID}/.well-known/jwks.json'
+# Global variables for caching
+_cognito_config = None
+
+def get_cognito_config():
+    global _cognito_config
+    if _cognito_config is None:
+        try:
+            resource_suffix = '${props.resourceSuffix}'
+            target_region = '${props.cognitoRegion || 'us-east-1'}'
+            ssm = boto3.client('ssm', region_name=target_region)
+            
+            # Get Cognito configuration from SSM
+            user_pool_id = ssm.get_parameter(
+                Name=f'/multimedia-rag/{resource_suffix}/cognito-user-pool-id'
+            )['Parameter']['Value']
+            
+            cognito_region = ssm.get_parameter(
+                Name=f'/multimedia-rag/{resource_suffix}/cognito-region'
+            )['Parameter']['Value']
+            
+            _cognito_config = {
+                'user_pool_id': user_pool_id,
+                'cognito_region': cognito_region,
+                'jwks_url': f'https://cognito-idp.{cognito_region}.amazonaws.com/{user_pool_id}/.well-known/jwks.json'
+            }
+        except Exception as e:
+            print(f'Error getting Cognito config from SSM: {str(e)}')
+            # Fallback to placeholder values if SSM fails
+            _cognito_config = {
+                'user_pool_id': 'POOL_ID_PLACEHOLDER',
+                'cognito_region': '${props.cognitoRegion || 'us-east-1'}',
+                'jwks_url': f'https://cognito-idp.${props.cognitoRegion || 'us-east-1'}.amazonaws.com/POOL_ID_PLACEHOLDER/.well-known/jwks.json'
+            }
+    
+    return _cognito_config
 def decode_token_segments(token):
   try:
       # Split token into header, payload, signature
@@ -192,8 +229,11 @@ def lambda_handler(event, context):
         # Verify expiry
         verify_token_expiry(payload)
         
+        # Get Cognito configuration
+        config = get_cognito_config()
+        
         # Verify issuer (iss) if needed
-        expected_issuer = f'https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{USER_POOL_ID}'
+        expected_issuer = f'https://cognito-idp.{config["cognito_region"]}.amazonaws.com/{config["user_pool_id"]}'
         if payload.get('iss') != expected_issuer:
             raise Exception('Invalid token issuer')
         

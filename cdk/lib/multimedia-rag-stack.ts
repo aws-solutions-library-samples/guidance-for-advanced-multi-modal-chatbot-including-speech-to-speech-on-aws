@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
+import * as ssm from 'aws-cdk-lib/aws-ssm';
 import { StorageDistStack } from './storage-dist-stack';
 import { AuthStack } from './auth-stack';
 import { OpenSearchStack } from './opensearch-stack';
@@ -160,6 +161,19 @@ export class MultimediaRagStack extends cdk.Stack {
       resourceSuffix: props.resourceConfig.resourceSuffix,
       mediaBucket: this.storageDistStack.mediaBucket,
       retrievalFunction: this.processingStack.retrievalFunction
+    });
+    
+    // Create SSM parameters for Lambda@Edge to read Cognito configuration
+    new ssm.StringParameter(this, 'CognitoUserPoolIdParam', {
+      parameterName: `/multimedia-rag/${props.resourceConfig.resourceSuffix}/cognito-user-pool-id`,
+      stringValue: this.authStack.userPool.userPoolId,
+      description: 'Cognito User Pool ID for Lambda@Edge JWT validation'
+    });
+    
+    new ssm.StringParameter(this, 'CognitoRegionParam', {
+      parameterName: `/multimedia-rag/${props.resourceConfig.resourceSuffix}/cognito-region`,
+      stringValue: this.region,
+      description: 'Cognito region for Lambda@Edge JWT validation'
     });
     
     // Now that we have the Auth stack, we can get the Cognito user pool details

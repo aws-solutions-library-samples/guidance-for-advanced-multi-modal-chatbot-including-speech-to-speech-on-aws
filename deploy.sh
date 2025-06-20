@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e  # Exit on error
 
-# Unified deployment script for Multimedia RAG Chat Assistant with Speech-to-Speech capabilities
+# Simplified deployment script for Multimedia RAG Chat Assistant with Speech-to-Speech capabilities
+# Uses SSM Parameter Store for Lambda@Edge configuration - eliminates complex ARN passing
 
 # Configuration with defaults
 ENV="dev"
@@ -80,20 +81,10 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] || [ "$LOCAL_CONFIG_ONLY" = "true" ]; th
   cd ..
 fi
 
-# Step 1: Build React App first (if not skipped)
-if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
-  echo "🖥️  Building React frontend..."
-  cd chatbot-react
-  npm install
-  npm run build
-  cd ..
-fi
+# Note: React frontend build moved after environment variables are generated
 
 # Step 2: Deploy Infrastructure Stack (if not skipped)
 if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
-  # Initialize variables for Lambda@Edge ARN
-  EDGE_LAMBDA_ARN=""
-  
   # Prepare deployment context variables
   DEPLOY_CONTEXT="--context resourceSuffix=$ENV"
   
@@ -122,19 +113,11 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
     npm ci
     npm run build
     
-    # Deploy Lambda@Edge stack in us-east-1
+    # Deploy Lambda@Edge stack in us-east-1 with target region context
     echo "Deploying LambdaEdgeStack-$ENV..."
-    npx cdk deploy "LambdaEdgeStack-$ENV" $DEPLOY_CONTEXT --profile $PROFILE --region us-east-1 --require-approval=never
+    npx cdk deploy "LambdaEdgeStack-$ENV" $DEPLOY_CONTEXT --context targetRegion=$REGION --profile $PROFILE --region us-east-1 --require-approval=never
     
-    # Get the Lambda@Edge ARN for use in MultimediaRagStack
-    EDGE_LAMBDA_ARN=$(aws cloudformation describe-stacks \
-      --stack-name "LambdaEdgeStack-$ENV" \
-      --query "Stacks[0].Outputs[?OutputKey=='LambdaEdgeVersionArn'].OutputValue" \
-      --output text \
-      --region us-east-1 \
-      --profile $PROFILE)
-    
-    echo "Lambda@Edge ARN: $EDGE_LAMBDA_ARN"
+    echo "✅ Lambda@Edge deployed successfully (will read Cognito config from SSM in $REGION)"
     cd ..
   fi
   
@@ -265,12 +248,15 @@ if [ "$LOCAL_CONFIG_ONLY" = "true" ] || [ "$SKIP_INFRASTRUCTURE" = "false" ]; th
     --profile $PROFILE)
   
   # Get CloudFront Domain Name
-  CLOUDFRONT_DOMAIN=$(aws cloudformation describe-stacks \
+  CLOUDFRONT_DOMAIN_FULL=$(aws cloudformation describe-stacks \
     --stack-name "MultimediaRagStack-$ENV" \
     --query "Stacks[0].Outputs[?OutputKey=='CloudFrontDomainName'].OutputValue" \
     --output text \
     --region $REGION \
     --profile $PROFILE)
+  
+  # Strip .cloudfront.net suffix to get just the subdomain
+  CLOUDFRONT_DOMAIN=${CLOUDFRONT_DOMAIN_FULL%.cloudfront.net}
   
   # Get Knowledge Base ID
   KNOWLEDGE_BASE_ID=$(aws cloudformation describe-stacks \
@@ -344,7 +330,16 @@ EOL
   echo "✅ Configuration generated successfully"
 fi
 
-# Step 4: Deploy frontend to S3 if not skipped
+# Step 4: Build React App with environment variables
+if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
+  echo "🖥️  Building React frontend with environment variables..."
+  cd chatbot-react
+  npm install
+  npm run build
+  cd ..
+fi
+
+# Step 5: Deploy frontend to S3 if not skipped
 if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
   echo "📤 Deploying frontend to S3..."
   

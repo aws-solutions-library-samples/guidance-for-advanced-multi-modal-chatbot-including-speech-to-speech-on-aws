@@ -253,7 +253,7 @@ export class StorageDistStack extends cdk.NestedStack {
               'EdgeFunction', 
               props.edgeLambdaVersionArn
             ),
-            eventType: cloudfront.LambdaEdgeEventType.VIEWER_REQUEST
+            eventType: cloudfront.LambdaEdgeEventType.ORIGIN_REQUEST
           }
         ]
       } : {})
