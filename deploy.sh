@@ -83,7 +83,7 @@ fi
 
 # Note: React frontend build moved after environment variables are generated
 
-# Step 2: Deploy Infrastructure Stack (if not skipped)
+# Deploy Infrastructure Stack (if not skipped)
 if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
   # Prepare deployment context variables
   DEPLOY_CONTEXT="--context resourceSuffix=$ENV"
@@ -106,7 +106,7 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
     DEPLOY_CONTEXT="$DEPLOY_CONTEXT --context deploySpeechToSpeech=true"
   fi
   
-  # Step 2.1: Deploy Lambda@Edge stack first if requested (must be in us-east-1)
+  # Deploy Lambda@Edge stack first if requested (must be in us-east-1)
   if [ "$EDGE_LAMBDA" = "true" ]; then
     echo "📦 Deploying Lambda@Edge stack in us-east-1..."
     cd cdk
@@ -121,11 +121,11 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
     cd ..
   fi
   
-  # Step 2.2: Prepare for Speech-to-Speech if requested (must be in us-east-1)
+  # Prepare for Speech-to-Speech if requested (must be in us-east-1)
   if [ "$S2S_ENABLED" = "true" ]; then
     echo "📦 Preparing Speech-to-Speech backend..."
     
-    # Step 2.2.1: Get or create ECR repository
+    # Get or create ECR repository
     echo "=== Getting or creating ECR repository ==="
     ECR_REPO_URI=$(aws ecr describe-repositories --repository-names "$ECR_REPO_NAME-$ENV" --profile $PROFILE --region us-east-1 --query 'repositories[0].repositoryUri' --output text 2>/dev/null || echo "")
 
@@ -144,7 +144,7 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
       fi
     fi
     
-    # Step 2.2.2: Build and push Docker image
+    # Build and push Docker image
     echo "=== Building and pushing Docker image ==="
     cd speech-backend
 
@@ -183,7 +183,7 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
     DEPLOY_CONTEXT="$DEPLOY_CONTEXT --context ecrRepositoryName=$ECR_REPO_NAME-$ENV"
   fi
   
-  # Step 2.3: Deploy MultimediaRagStack
+  # Deploy MultimediaRagStack
   echo "📦 Deploying MultimediaRagStack..."
   cd cdk
   
@@ -200,11 +200,11 @@ if [ "$SKIP_INFRASTRUCTURE" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; t
   cd ..
 fi
 
-# Step 3: Generate local and production configurations
+# Generate local and production configurations
 if [ "$LOCAL_CONFIG_ONLY" = "true" ] || [ "$SKIP_INFRASTRUCTURE" = "false" ]; then
   echo "⚙️  Generating configurations..."
   
-  # Step 3.1: Get outputs from MultimediaRagStack
+  # Get outputs from MultimediaRagStack
   echo "🔍 Getting outputs from MultimediaRagStack..."
   
   # Get Lambda function name
@@ -274,7 +274,7 @@ if [ "$LOCAL_CONFIG_ONLY" = "true" ] || [ "$SKIP_INFRASTRUCTURE" = "false" ]; th
     --region $REGION \
     --profile $PROFILE)
   
-  # Step 3.2: Get WebSocket URL from MultimediaRagStack if Speech-to-Speech is deployed
+  # Get WebSocket URL from MultimediaRagStack if Speech-to-Speech is deployed
   WEBSOCKET_URL=""
   if [ "$S2S_ENABLED" = "true" ]; then
     echo "🔍 Getting WebSocket URL from MultimediaRagStack..."
@@ -308,7 +308,7 @@ if [ "$LOCAL_CONFIG_ONLY" = "true" ] || [ "$SKIP_INFRASTRUCTURE" = "false" ]; th
     fi
   fi
   
-  # Step 3.3: Generate complete .env file
+  # Generate complete .env file
   echo "📝 Generating .env file with all outputs..."
   cat > chatbot-react/.env << EOL
 REACT_APP_LAMBDA_FUNCTION_NAME=$LAMBDA_FUNCTION_NAME
@@ -330,7 +330,7 @@ EOL
   echo "✅ Configuration generated successfully"
 fi
 
-# Step 4: Build React App with environment variables
+# Build React App with environment variables
 if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
   echo "🖥️  Building React frontend with environment variables..."
   cd chatbot-react
@@ -339,7 +339,7 @@ if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
   cd ..
 fi
 
-# Step 5: Deploy frontend to S3 if not skipped
+# Deploy frontend to S3 if not skipped
 if [ "$SKIP_FRONTEND" = "false" ] && [ "$LOCAL_CONFIG_ONLY" = "false" ]; then
   echo "📤 Deploying frontend to S3..."
   
